@@ -1,0 +1,30 @@
+{
+  "name": "mcp-http-bridge",
+  "version": "1.0.0",
+  "description": "HTTP bridge service for MCP (Model Context Protocol) - enables Dify/N8N to call MCP services via HTTP API",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "dify",
+    "n8n",
+    "shopify",
+    "ai",
+    "bridge"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

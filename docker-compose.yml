@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  mcp-bridge:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - MCP_STOREFRONT_ENDPOINT=${MCP_STOREFRONT_ENDPOINT}
+      - MCP_CUSTOMER_ENDPOINT=${MCP_CUSTOMER_ENDPOINT}
+      - MCP_ACCESS_TOKEN=${MCP_ACCESS_TOKEN}
+    restart: unless-stopped
