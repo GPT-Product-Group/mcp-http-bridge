@@ -34,7 +34,21 @@ router.post('/', async (req, res) => {
       });
     }
 
+    console.log('\n========== Incoming Request ==========');
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+
     const { tool, arguments: toolArgs } = req.body;
+
+    // 处理 arguments 可能是字符串的情况（Dify 有时会这样传）
+    let parsedArgs = toolArgs;
+    if (typeof toolArgs === 'string') {
+      try {
+        parsedArgs = JSON.parse(toolArgs);
+        console.log('Parsed string arguments to object:', parsedArgs);
+      } catch (e) {
+        console.log('Arguments is a string but not JSON, using as-is');
+      }
+    }
 
     // 验证必填参数
     if (!tool) {
@@ -46,12 +60,18 @@ router.post('/', async (req, res) => {
 
     // 确保已连接
     if (mcpClient.getTools().length === 0) {
+      console.log('No tools loaded, connecting to MCP servers...');
       await mcpClient.connectAll();
     }
 
     // 调用工具
-    console.log(`Calling tool: ${tool} with args:`, toolArgs);
-    const result = await mcpClient.callTool(tool, toolArgs || {});
+    console.log(`Calling tool: ${tool}`);
+    console.log('Arguments:', JSON.stringify(parsedArgs, null, 2));
+    
+    const result = await mcpClient.callTool(tool, parsedArgs || {});
+
+    console.log('Tool call successful!');
+    console.log('Result preview:', JSON.stringify(result).substring(0, 500));
 
     res.json({
       success: true,
@@ -60,6 +80,11 @@ router.post('/', async (req, res) => {
     });
   } catch (error) {
     console.error('Error calling tool:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      data: error.data
+    });
     
     // 根据错误类型返回不同的状态码
     const statusCode = error.message.includes('not found') ? 404 : 500;
@@ -67,7 +92,8 @@ router.post('/', async (req, res) => {
     res.status(statusCode).json({
       success: false,
       error: 'Tool call failed',
-      message: error.message
+      message: error.message,
+      details: error.data || null
     });
   }
 });

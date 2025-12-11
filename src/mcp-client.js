@@ -138,12 +138,24 @@ class MCPClient {
    * @private
    */
   async _callStorefrontTool(toolName, toolArgs) {
-    console.log(`Calling storefront tool: ${toolName}`, toolArgs);
+    // 处理参数 - 确保 search_shop_catalog 有必需的 context 参数
+    let processedArgs = { ...toolArgs };
+    
+    if (toolName === 'search_shop_catalog') {
+      if (!processedArgs.context) {
+        processedArgs.context = processedArgs.query 
+          ? `User is searching for: ${processedArgs.query}`
+          : 'General product search';
+      }
+    }
+    
+    console.log(`Calling storefront tool: ${toolName}`);
+    console.log('Processed arguments:', JSON.stringify(processedArgs, null, 2));
 
     const response = await this._makeJsonRpcRequest(
       this.storefrontEndpoint,
       "tools/call",
-      { name: toolName, arguments: toolArgs },
+      { name: toolName, arguments: processedArgs },
       { "Content-Type": "application/json" }
     );
 
@@ -177,28 +189,45 @@ class MCPClient {
    * @private
    */
   async _makeJsonRpcRequest(endpoint, method, params, headers) {
+    const requestBody = {
+      jsonrpc: "2.0",
+      method: method,
+      id: Date.now(),
+      params: params
+    };
+
+    console.log(`\n=== MCP Request ===`);
+    console.log(`Endpoint: ${endpoint}`);
+    console.log(`Method: ${method}`);
+    console.log(`Body: ${JSON.stringify(requestBody, null, 2)}`);
+
     const response = await fetch(endpoint, {
       method: "POST",
       headers: headers,
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        method: method,
-        id: Date.now(),
-        params: params
-      })
+      body: JSON.stringify(requestBody)
     });
 
+    const responseText = await response.text();
+    console.log(`\n=== MCP Response ===`);
+    console.log(`Status: ${response.status}`);
+    console.log(`Body: ${responseText.substring(0, 1000)}${responseText.length > 1000 ? '...' : ''}`);
+
     if (!response.ok) {
-      const errorText = await response.text();
-      const error = new Error(`MCP request failed: ${response.status} ${errorText}`);
+      const error = new Error(`MCP request failed: ${response.status} ${responseText}`);
       error.status = response.status;
       throw error;
     }
 
-    const result = await response.json();
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (e) {
+      throw new Error(`Failed to parse MCP response: ${responseText}`);
+    }
     
     // 检查 JSON-RPC 错误
     if (result.error) {
+      console.error(`MCP Error: ${JSON.stringify(result.error)}`);
       const error = new Error(result.error.message || 'MCP returned an error');
       error.code = result.error.code;
       error.data = result.error.data;
