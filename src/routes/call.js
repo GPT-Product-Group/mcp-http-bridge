@@ -42,12 +42,39 @@ router.post('/', async (req, res) => {
     // 处理 arguments 可能是字符串的情况（Dify 有时会这样传）
     let parsedArgs = toolArgs;
     if (typeof toolArgs === 'string') {
+      console.log('Arguments is a string, attempting to parse...');
+      console.log('Raw string:', toolArgs);
+      
       try {
+        // 先尝试标准 JSON 解析
         parsedArgs = JSON.parse(toolArgs);
-        console.log('Parsed string arguments to object:', parsedArgs);
+        console.log('Parsed with JSON.parse:', parsedArgs);
       } catch (e) {
-        console.log('Arguments is a string but not JSON, using as-is');
+        console.log('Standard JSON.parse failed, trying to fix format...');
+        try {
+          // Dify 可能传递 Python 风格的字符串（单引号），尝试转换
+          // 将单引号替换为双引号（注意处理转义）
+          const fixedJson = toolArgs
+            .replace(/'/g, '"')  // 单引号 -> 双引号
+            .replace(/True/g, 'true')  // Python True -> JSON true
+            .replace(/False/g, 'false')  // Python False -> JSON false
+            .replace(/None/g, 'null');  // Python None -> JSON null
+          
+          console.log('Fixed JSON string:', fixedJson);
+          parsedArgs = JSON.parse(fixedJson);
+          console.log('Parsed with fixed format:', parsedArgs);
+        } catch (e2) {
+          console.error('Failed to parse arguments:', e2.message);
+          // 如果还是失败，返回空对象
+          parsedArgs = {};
+        }
       }
+    }
+    
+    // 确保 parsedArgs 是对象
+    if (typeof parsedArgs !== 'object' || parsedArgs === null) {
+      console.log('parsedArgs is not an object, using empty object');
+      parsedArgs = {};
     }
 
     // 验证必填参数
