@@ -208,7 +208,9 @@ router.post('/messages', async (req, res) => {
         break;
 
       case 'tools/call':
-        result = await handleToolsCall(mcpClient, params);
+        // 从请求头提取 accessToken
+        const sseToken = req.headers['authorization'] || req.headers['x-access-token'];
+        result = await handleToolsCall(mcpClient, params, { accessToken: sseToken });
         break;
 
       default:
@@ -333,7 +335,9 @@ async function handleMcpMessage(req, res) {
         break;
 
       case 'tools/call':
-        result = await handleToolsCall(mcpClient, params);
+        // 从请求头提取 accessToken
+        const httpToken = req.headers['authorization'] || req.headers['x-access-token'];
+        result = await handleToolsCall(mcpClient, params, { accessToken: httpToken });
         break;
 
       default:
@@ -452,15 +456,19 @@ async function handleToolsList(mcpClient) {
 
 /**
  * 处理 tools/call 方法
+ * @param {Object} mcpClient - MCP 客户端实例
+ * @param {Object} params - 工具调用参数
+ * @param {Object} options - 可选配置
+ * @param {string} options.accessToken - 动态传递的访问令牌
  */
-async function handleToolsCall(mcpClient, params) {
+async function handleToolsCall(mcpClient, params, options = {}) {
   console.log('Handling tools/call:', params);
 
   if (!mcpClient) {
     throw new Error('MCP client not initialized');
   }
 
-  const { name, arguments: toolArgs } = params || {};
+  const { name, arguments: toolArgs, accessToken: paramToken } = params || {};
 
   if (!name) {
     throw new Error('Tool name is required');
@@ -492,10 +500,18 @@ async function handleToolsCall(mcpClient, params) {
     }
   }
 
+  // 支持从参数中传递 accessToken（优先于 options）
+  const dynamicToken = paramToken || options.accessToken;
+  const callOptions = dynamicToken ? { accessToken: dynamicToken } : {};
+
+  if (dynamicToken) {
+    console.log('Using dynamic accessToken for tool call');
+  }
+
   console.log(`Calling tool: ${name}`);
   console.log('Arguments:', JSON.stringify(parsedArgs, null, 2));
 
-  const result = await mcpClient.callTool(name, parsedArgs);
+  const result = await mcpClient.callTool(name, parsedArgs, callOptions);
 
   // 返回 MCP 标准格式的工具调用结果
   return {

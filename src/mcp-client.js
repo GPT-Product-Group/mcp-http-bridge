@@ -120,14 +120,16 @@ class MCPClient {
    * 调用指定的工具
    * @param {string} toolName - 工具名称
    * @param {Object} toolArgs - 工具参数
+   * @param {Object} options - 可选配置
+   * @param {string} options.accessToken - 动态传递的访问令牌（优先于实例配置）
    * @returns {Promise<Object>} 工具调用结果
    */
-  async callTool(toolName, toolArgs = {}) {
+  async callTool(toolName, toolArgs = {}, options = {}) {
     // 确定工具属于哪个服务器
     if (this.storefrontTools.some(t => t.name === toolName)) {
       return this._callStorefrontTool(toolName, toolArgs);
     } else if (this.customerTools.some(t => t.name === toolName)) {
-      return this._callCustomerTool(toolName, toolArgs);
+      return this._callCustomerTool(toolName, toolArgs, options);
     } else {
       throw new Error(`Tool "${toolName}" not found. Available tools: ${this.tools.map(t => t.name).join(', ')}`);
     }
@@ -165,13 +167,24 @@ class MCPClient {
   /**
    * 调用客户账户工具
    * @private
+   * @param {string} toolName - 工具名称
+   * @param {Object} toolArgs - 工具参数
+   * @param {Object} options - 可选配置
+   * @param {string} options.accessToken - 动态传递的访问令牌（优先于实例配置）
    */
-  async _callCustomerTool(toolName, toolArgs) {
+  async _callCustomerTool(toolName, toolArgs, options = {}) {
     console.log(`Calling customer tool: ${toolName}`, toolArgs);
+
+    // 优先使用动态传递的 token，其次使用实例配置的 token
+    const token = options.accessToken || this.accessToken || "";
+
+    if (options.accessToken) {
+      console.log('Using dynamic accessToken from request');
+    }
 
     const headers = {
       "Content-Type": "application/json",
-      "Authorization": this.accessToken || ""
+      "Authorization": token
     };
 
     const response = await this._makeJsonRpcRequest(
