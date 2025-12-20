@@ -139,6 +139,33 @@ Content-Type: application/json
 
 ## 在 Dify 中使用
 
+### 方式一：MCP 服务 (HTTP) - 推荐
+
+本服务完全支持 Dify 的原生 MCP HTTP 协议集成：
+
+1. 进入 Dify，点击「工具」→「MCP」
+2. 点击「添加 MCP 服务 (HTTP)」
+3. 输入 SSE URL：
+   ```
+   http://your-server:3000/mcp/sse
+   ```
+4. Dify 会自动发现服务并获取可用工具
+5. 完成！现在可以在 Agent 或 Workflow 中使用 MCP 工具
+
+**MCP HTTP 端点说明：**
+- `GET /mcp/sse` - SSE 端点，用于服务发现
+- `POST /mcp/message` - JSON-RPC 消息端点
+
+**支持的 MCP 方法：**
+- `initialize` - 初始化连接
+- `notifications/initialized` - 初始化完成通知
+- `tools/list` - 获取工具列表
+- `tools/call` - 调用工具
+
+### 方式二：自定义 HTTP 工具（传统方式）
+
+也可以作为自定义 HTTP 工具使用：
+
 1. 进入 Dify 工作室，创建或编辑一个应用
 2. 在「工具」面板中，点击「添加自定义工具」
 3. 填写配置：
@@ -191,7 +218,8 @@ mcp-http-bridge/
 │   ├── mcp-client.js      # MCP 客户端
 │   └── routes/
 │       ├── tools.js       # GET /api/tools
-│       └── call.js        # POST /api/call
+│       ├── call.js        # POST /api/call
+│       └── mcp.js         # MCP 协议端点 (Dify MCP HTTP)
 ├── package.json
 ├── Dockerfile
 ├── docker-compose.yml

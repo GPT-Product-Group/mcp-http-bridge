@@ -9,6 +9,7 @@ import dotenv from 'dotenv';
 import MCPClient from './mcp-client.js';
 import toolsRouter from './routes/tools.js';
 import callRouter from './routes/call.js';
+import mcpRouter from './routes/mcp.js';
 
 // 加载环境变量
 dotenv.config();
@@ -40,6 +41,9 @@ app.set('mcpClient', mcpClient);
 app.use('/api/tools', toolsRouter);
 app.use('/api/call', callRouter);
 
+// MCP 协议路由 (用于 Dify MCP HTTP 集成)
+app.use('/mcp', mcpRouter);
+
 // 健康检查
 app.get('/api/health', (req, res) => {
   res.json({
@@ -54,6 +58,9 @@ app.get('/api/health', (req, res) => {
 
 // 根路由 - API 文档
 app.get('/', (req, res) => {
+  const protocol = req.protocol;
+  const host = req.get('host');
+
   res.json({
     name: 'MCP HTTP Bridge',
     version: '1.0.0',
@@ -61,7 +68,19 @@ app.get('/', (req, res) => {
     endpoints: {
       'GET /api/health': 'Health check',
       'GET /api/tools': 'List all available MCP tools',
-      'POST /api/call': 'Call a specific MCP tool'
+      'POST /api/call': 'Call a specific MCP tool',
+      'GET /mcp/sse': 'MCP SSE endpoint for Dify service discovery',
+      'POST /mcp/message': 'MCP JSON-RPC message endpoint'
+    },
+    dify_integration: {
+      description: 'To add this service in Dify as an MCP Server (HTTP)',
+      sse_url: `${protocol}://${host}/mcp/sse`,
+      instructions: [
+        '1. In Dify, go to Tools > MCP',
+        '2. Click "Add MCP Server (HTTP)"',
+        '3. Enter the SSE URL shown above',
+        '4. Dify will automatically discover the message endpoint'
+      ]
     },
     usage: {
       '/api/call': {
@@ -84,7 +103,14 @@ app.use((req, res) => {
   res.status(404).json({
     error: 'Not Found',
     message: `Endpoint ${req.method} ${req.path} does not exist`,
-    availableEndpoints: ['GET /', 'GET /api/health', 'GET /api/tools', 'POST /api/call']
+    availableEndpoints: [
+      'GET /',
+      'GET /api/health',
+      'GET /api/tools',
+      'POST /api/call',
+      'GET /mcp/sse',
+      'POST /mcp/message'
+    ]
   });
 });
 
@@ -104,10 +130,17 @@ app.listen(PORT, async () => {
   console.log('========================================');
   console.log(`  Server running at http://localhost:${PORT}`);
   console.log('');
-  console.log('  Endpoints:');
+  console.log('  REST API Endpoints:');
   console.log(`    GET  http://localhost:${PORT}/api/health`);
   console.log(`    GET  http://localhost:${PORT}/api/tools`);
   console.log(`    POST http://localhost:${PORT}/api/call`);
+  console.log('');
+  console.log('  Dify MCP HTTP Endpoints:');
+  console.log(`    GET  http://localhost:${PORT}/mcp/sse     (SSE for service discovery)`);
+  console.log(`    POST http://localhost:${PORT}/mcp/message (JSON-RPC messages)`);
+  console.log('');
+  console.log('  To add in Dify:');
+  console.log(`    Use SSE URL: http://localhost:${PORT}/mcp/sse`);
   console.log('========================================');
 
   // 启动时尝试连接 MCP 服务器
