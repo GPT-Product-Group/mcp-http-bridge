@@ -69,8 +69,9 @@ app.get('/', (req, res) => {
       'GET /api/health': 'Health check',
       'GET /api/tools': 'List all available MCP tools',
       'POST /api/call': 'Call a specific MCP tool',
-      'GET /mcp/sse': 'MCP SSE endpoint for Dify service discovery',
-      'POST /mcp/message': 'MCP JSON-RPC message endpoint'
+      'GET /mcp/sse': 'MCP SSE endpoint - establishes SSE connection and returns messages endpoint',
+      'POST /mcp/messages?session_id=xxx': 'MCP SSE transport - receives requests and sends responses via SSE stream',
+      'POST /mcp/message': 'MCP JSON-RPC message endpoint (legacy)'
     },
     dify_integration: {
       description: 'To add this service in Dify as an MCP Server (HTTP)',
