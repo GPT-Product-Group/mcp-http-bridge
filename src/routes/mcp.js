@@ -183,21 +183,26 @@ async function handleMcpMessage(req, res) {
         });
     }
 
-    console.log('Response result:', JSON.stringify(result).substring(0, 500));
+    // 构建完整的 JSON-RPC 2.0 响应
+    let response;
 
     // 对于通知(没有 id 或 id 为 null)，返回空响应体或简单确认
     if (id === undefined || id === null) {
-      return res.json({
+      response = {
         jsonrpc: '2.0',
         result: {}
-      });
+      };
+    } else {
+      // 标准 JSON-RPC 2.0 响应格式
+      response = {
+        jsonrpc: '2.0',
+        id: id,
+        result: result
+      };
     }
 
-    res.json({
-      jsonrpc: '2.0',
-      id: id,
-      result: result
-    });
+    console.log('Sending JSON-RPC response:', JSON.stringify(response).substring(0, 1000));
+    res.json(response);
 
   } catch (error) {
     console.error('MCP method error:', error);
