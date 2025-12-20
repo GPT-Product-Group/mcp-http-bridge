@@ -64,11 +64,25 @@ function sendSseMessage(res, data) {
  * GET /sse
  * SSE 端点 - Dify 用这个端点发现 MCP 消息端点
  * 建立 SSE 连接后，发送 endpoint 事件告诉客户端后续 POST 请求发送到哪里
+ *
+ * 支持通过 URL 参数传递 accessToken:
+ * GET /sse?access_token=xxx
  */
 router.get('/sse', (req, res) => {
   console.log('\n========== SSE Connection ==========');
   console.log('Client connected to SSE endpoint');
+  console.log('Query params:', req.query);
   console.log('Headers:', JSON.stringify(req.headers, null, 2));
+
+  // 从 URL 参数或请求头获取 accessToken
+  const accessToken = req.query.access_token || req.query.accessToken ||
+                      req.headers['authorization'] || req.headers['x-access-token'];
+
+  if (accessToken) {
+    console.log('AccessToken provided via URL/header:', accessToken.substring(0, 10) + '...');
+  } else {
+    console.log('WARNING: No accessToken provided in URL or headers');
+  }
 
   // 生成 session ID 用于关联此 SSE 连接
   const sessionId = generateSessionId();
@@ -100,9 +114,10 @@ router.get('/sse', (req, res) => {
   res.write(`event: endpoint\n`);
   res.write(`data: ${messageEndpoint}\n\n`);
 
-  // 存储 session 信息，包括 SSE response 对象用于后续发送响应
+  // 存储 session 信息，包括 SSE response 对象和 accessToken 用于后续发送响应
   sessions.set(sessionId, {
     res: res,
+    accessToken: accessToken || null,
     createdAt: Date.now()
   });
   console.log(`Session stored. Active sessions: ${sessions.size}`);
@@ -208,8 +223,15 @@ router.post('/messages', async (req, res) => {
         break;
 
       case 'tools/call':
-        // 从请求头提取 accessToken
-        const sseToken = req.headers['authorization'] || req.headers['x-access-token'];
+        // 优先从 session 中获取 accessToken（SSE 连接时通过 URL 参数传递）
+        // 其次从请求头提取
+        const sessionToken = session.accessToken;
+        const headerToken = req.headers['authorization'] || req.headers['x-access-token'];
+        const sseToken = sessionToken || headerToken;
+        console.log('=== Token Debug ===');
+        console.log('Session accessToken:', sessionToken ? sessionToken.substring(0, 10) + '...' : 'null');
+        console.log('Header accessToken:', headerToken ? headerToken.substring(0, 10) + '...' : 'null');
+        console.log('Final token:', sseToken ? sseToken.substring(0, 10) + '...' : 'null');
         result = await handleToolsCall(mcpClient, params, { accessToken: sseToken });
         break;
 
