@@ -79,7 +79,9 @@ router.get('/sse', (req, res) => {
                       req.headers['authorization'] || req.headers['x-access-token'];
 
   if (accessToken) {
-    console.log('AccessToken provided via URL/header');
+    console.log('AccessToken provided via URL/header:', accessToken.substring(0, 10) + '...');
+  } else {
+    console.log('WARNING: No accessToken provided in URL or headers');
   }
 
   // 生成 session ID 用于关联此 SSE 连接
@@ -226,9 +228,10 @@ router.post('/messages', async (req, res) => {
         const sessionToken = session.accessToken;
         const headerToken = req.headers['authorization'] || req.headers['x-access-token'];
         const sseToken = sessionToken || headerToken;
-        if (sessionToken) {
-          console.log('Using accessToken from session (SSE URL parameter)');
-        }
+        console.log('=== Token Debug ===');
+        console.log('Session accessToken:', sessionToken ? sessionToken.substring(0, 10) + '...' : 'null');
+        console.log('Header accessToken:', headerToken ? headerToken.substring(0, 10) + '...' : 'null');
+        console.log('Final token:', sseToken ? sseToken.substring(0, 10) + '...' : 'null');
         result = await handleToolsCall(mcpClient, params, { accessToken: sseToken });
         break;
 
