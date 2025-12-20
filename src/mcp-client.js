@@ -67,9 +67,15 @@ class MCPClient {
     try {
       console.log(`Connecting to Customer MCP at ${this.customerEndpoint}`);
 
+      // 确保 token 有 Bearer 前缀
+      let token = this.accessToken || "";
+      if (token && !token.toLowerCase().startsWith('bearer ')) {
+        token = `Bearer ${token}`;
+      }
+
       const headers = {
         "Content-Type": "application/json",
-        "Authorization": this.accessToken || ""
+        "Authorization": token
       };
 
       const response = await this._makeJsonRpcRequest(
@@ -176,11 +182,18 @@ class MCPClient {
     console.log(`Calling customer tool: ${toolName}`, toolArgs);
 
     // 优先使用动态传递的 token，其次使用实例配置的 token
-    const token = options.accessToken || this.accessToken || "";
+    let token = options.accessToken || this.accessToken || "";
 
     if (options.accessToken) {
       console.log('Using dynamic accessToken from request');
     }
+
+    // 确保 token 有 Bearer 前缀（Shopify Customer Account API 需要）
+    if (token && !token.toLowerCase().startsWith('bearer ')) {
+      token = `Bearer ${token}`;
+    }
+
+    console.log('Authorization header:', token ? token.substring(0, 15) + '...' : 'empty');
 
     const headers = {
       "Content-Type": "application/json",
