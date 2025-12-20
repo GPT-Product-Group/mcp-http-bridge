@@ -1,9 +1,14 @@
 /**
  * MCP Protocol Routes for Dify Integration
  *
- * 实现 Dify MCP HTTP 服务所需的端点:
+ * 支持两种传输协议：
+ * 1. SSE (Server-Sent Events) - 旧版协议
+ * 2. Streamable HTTP - 新版协议 (2025-03-26)
+ *
+ * 端点:
  * - GET /sse - SSE 端点用于服务发现
- * - POST /message - JSON-RPC 消息端点
+ * - POST /sse - Streamable HTTP JSON-RPC 端点
+ * - POST /message - JSON-RPC 消息端点（兼容旧版）
  *
  * 支持的 MCP 方法:
  * - initialize
@@ -13,6 +18,7 @@
  */
 
 import { Router } from 'express';
+import crypto from 'crypto';
 
 const router = Router();
 
@@ -30,28 +36,40 @@ const SERVER_CAPABILITIES = {
   tools: {}
 };
 
+// Session 存储
+const sessions = new Map();
+
+/**
+ * 生成 Session ID
+ */
+function generateSessionId() {
+  return crypto.randomUUID();
+}
+
 /**
  * GET /sse
  * SSE 端点 - Dify 用这个端点发现 MCP 消息端点
- *
- * 返回格式:
- * event: endpoint
- * data: <message_endpoint_url>
  */
 router.get('/sse', (req, res) => {
   console.log('\n========== SSE Connection ==========');
   console.log('Client connected to SSE endpoint');
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
 
   // 设置 SSE 响应头
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
 
-  // 构建消息端点 URL
+  // 构建消息端点 URL - 使用同一个 /sse 端点（Streamable HTTP 模式）
   const protocol = req.protocol;
   const host = req.get('host');
-  const messageEndpoint = `${protocol}://${host}/mcp/message`;
+  // 尝试使用 X-Forwarded 头（如果通过代理）
+  const forwardedProto = req.get('X-Forwarded-Proto') || protocol;
+  const forwardedHost = req.get('X-Forwarded-Host') || host;
+  const messageEndpoint = `${forwardedProto}://${forwardedHost}/mcp/sse`;
 
   console.log(`Sending endpoint event: ${messageEndpoint}`);
 
@@ -59,10 +77,17 @@ router.get('/sse', (req, res) => {
   res.write(`event: endpoint\n`);
   res.write(`data: ${messageEndpoint}\n\n`);
 
-  // 保持连接活跃 - 每 30 秒发送心跳
+  // 立即 flush
+  res.flushHeaders();
+
+  // 保持连接活跃 - 每 15 秒发送心跳
   const heartbeatInterval = setInterval(() => {
-    res.write(`:heartbeat\n\n`);
-  }, 30000);
+    try {
+      res.write(`:heartbeat\n\n`);
+    } catch (e) {
+      clearInterval(heartbeatInterval);
+    }
+  }, 15000);
 
   // 客户端断开连接时清理
   req.on('close', () => {
@@ -72,20 +97,38 @@ router.get('/sse', (req, res) => {
 });
 
 /**
+ * POST /sse
+ * Streamable HTTP 端点 - 处理 JSON-RPC 消息
+ * 这是新版 MCP 协议的主要端点
+ */
+router.post('/sse', async (req, res) => {
+  await handleMcpMessage(req, res);
+});
+
+/**
  * POST /message
- * MCP JSON-RPC 消息端点
- *
- * 处理所有 MCP 方法:
- * - initialize
- * - notifications/initialized
- * - tools/list
- * - tools/call
+ * 传统 JSON-RPC 消息端点（保持向后兼容）
  */
 router.post('/message', async (req, res) => {
+  await handleMcpMessage(req, res);
+});
+
+/**
+ * 处理 MCP JSON-RPC 消息
+ */
+async function handleMcpMessage(req, res) {
   const mcpClient = req.app.get('mcpClient');
 
   console.log('\n========== MCP Message ==========');
+  console.log('URL:', req.originalUrl);
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
   console.log('Request body:', JSON.stringify(req.body, null, 2));
+
+  // 设置响应头
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
 
   const { jsonrpc, id, method, params } = req.body;
 
@@ -103,13 +146,20 @@ router.post('/message', async (req, res) => {
 
   try {
     let result;
+    let sessionId = req.get('Mcp-Session-Id');
 
     switch (method) {
       case 'initialize':
         result = await handleInitialize(params);
+        // 生成新的 Session ID
+        sessionId = generateSessionId();
+        sessions.set(sessionId, { createdAt: Date.now() });
+        res.setHeader('Mcp-Session-Id', sessionId);
+        console.log(`Created session: ${sessionId}`);
         break;
 
       case 'notifications/initialized':
+      case 'initialized':
         // 这是一个通知，返回空结果
         result = {};
         break;
@@ -135,11 +185,11 @@ router.post('/message', async (req, res) => {
 
     console.log('Response result:', JSON.stringify(result).substring(0, 500));
 
-    // 对于通知(没有 id)，仍然返回响应但不包含 id
-    if (method.startsWith('notifications/')) {
+    // 对于通知(没有 id 或 id 为 null)，返回空响应体或简单确认
+    if (id === undefined || id === null) {
       return res.json({
         jsonrpc: '2.0',
-        result: result
+        result: {}
       });
     }
 
@@ -161,6 +211,25 @@ router.post('/message', async (req, res) => {
       }
     });
   }
+}
+
+/**
+ * OPTIONS 请求处理（CORS 预检）
+ */
+router.options('/sse', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.status(204).end();
+});
+
+router.options('/message', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.status(204).end();
 });
 
 /**
