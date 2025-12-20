@@ -37,7 +37,14 @@ router.post('/', async (req, res) => {
     console.log('\n========== Incoming Request ==========');
     console.log('Request body:', JSON.stringify(req.body, null, 2));
 
-    const { tool, arguments: toolArgs } = req.body;
+    const { tool, arguments: toolArgs, accessToken } = req.body;
+
+    // 从请求头或请求体提取 accessToken（请求体优先）
+    const dynamicToken = accessToken || req.headers['authorization'] || req.headers['x-access-token'];
+
+    if (dynamicToken) {
+      console.log('Dynamic accessToken provided in request');
+    }
 
     // 处理 arguments 可能是字符串的情况（Dify 有时会这样传）
     let parsedArgs = toolArgs;
@@ -94,8 +101,11 @@ router.post('/', async (req, res) => {
     // 调用工具
     console.log(`Calling tool: ${tool}`);
     console.log('Arguments:', JSON.stringify(parsedArgs, null, 2));
-    
-    const result = await mcpClient.callTool(tool, parsedArgs || {});
+
+    // 构建调用选项，包含动态 token
+    const callOptions = dynamicToken ? { accessToken: dynamicToken } : {};
+
+    const result = await mcpClient.callTool(tool, parsedArgs || {}, callOptions);
 
     console.log('Tool call successful!');
     console.log('Result preview:', JSON.stringify(result).substring(0, 500));
