@@ -1,9 +1,14 @@
 /**
  * Tool Call API 路由
  * POST /api/call - 调用指定的 MCP 工具
+ * 
+ * 增强功能：
+ * - 支持通过 session_id 自动获取存储的 customer token
+ * - 调用需要认证的工具时自动使用 token
  */
 
 import { Router } from 'express';
+import { getCustomerToken } from '../db.js';
 
 const router = Router();
 
@@ -14,13 +19,23 @@ const router = Router();
  * Request Body:
  * {
  *   "tool": "tool_name",           // 必填：工具名称
- *   "arguments": { ... }           // 可选：工具参数
+ *   "arguments": { ... },          // 可选：工具参数
+ *   "session_id": "xxx",           // 可选：会话 ID（用于自动获取存储的 token）
+ *   "accessToken": "xxx"           // 可选：直接传递 access token（优先级最高）
  * }
  * 
  * Response:
  * {
  *   "success": true,
  *   "result": { ... }              // 工具返回结果
+ * }
+ * 
+ * 如果需要认证但没有有效 token，返回：
+ * {
+ *   "success": false,
+ *   "error": "auth_required",
+ *   "auth_url": "https://...",     // 认证 URL
+ *   "session_id": "xxx"            // 用于后续调用的 session ID
  * }
  */
 router.post('/', async (req, res) => {
@@ -37,13 +52,26 @@ router.post('/', async (req, res) => {
     console.log('\n========== Incoming Request ==========');
     console.log('Request body:', JSON.stringify(req.body, null, 2));
 
-    const { tool, arguments: toolArgs, accessToken } = req.body;
+    const { tool, arguments: toolArgs, accessToken, session_id } = req.body;
 
     // 从请求头或请求体提取 accessToken（请求体优先）
-    const dynamicToken = accessToken || req.headers['authorization'] || req.headers['x-access-token'];
+    const headerToken = req.headers['authorization'] || req.headers['x-access-token'];
+    let dynamicToken = accessToken || headerToken;
+
+    // 如果没有直接传递 token，尝试从数据库获取
+    if (!dynamicToken && session_id) {
+      console.log('Attempting to get token from database for session:', session_id);
+      const tokenRecord = getCustomerToken(session_id);
+      if (tokenRecord && tokenRecord.access_token) {
+        dynamicToken = tokenRecord.access_token;
+        console.log('Found token in database, expires:', tokenRecord.expires_at);
+      } else {
+        console.log('No valid token found in database for session:', session_id);
+      }
+    }
 
     if (dynamicToken) {
-      console.log('Dynamic accessToken provided in request');
+      console.log('Using accessToken:', dynamicToken.substring(0, 15) + '...');
     }
 
     // 处理 arguments 可能是字符串的情况（Dify 有时会这样传）
@@ -95,17 +123,32 @@ router.post('/', async (req, res) => {
     // 确保已连接
     if (mcpClient.getTools().length === 0) {
       console.log('No tools loaded, connecting to MCP servers...');
-      await mcpClient.connectAll();
+      await mcpClient.connectAll({ sessionId: session_id });
     }
 
     // 调用工具
     console.log(`Calling tool: ${tool}`);
     console.log('Arguments:', JSON.stringify(parsedArgs, null, 2));
 
-    // 构建调用选项，包含动态 token
-    const callOptions = dynamicToken ? { accessToken: dynamicToken } : {};
+    // 构建调用选项，包含动态 token 和 session_id
+    const callOptions = {
+      accessToken: dynamicToken,
+      sessionId: session_id
+    };
 
     const result = await mcpClient.callTool(tool, parsedArgs || {}, callOptions);
+
+    // 检查是否返回了认证错误
+    if (result && result.error && result.error.type === 'auth_required') {
+      console.log('Authentication required, returning auth URL');
+      return res.status(401).json({
+        success: false,
+        error: 'auth_required',
+        message: result.error.message,
+        auth_url: result.error.auth_url,
+        session_id: result.error.session_id || session_id
+      });
+    }
 
     console.log('Tool call successful!');
     console.log('Result preview:', JSON.stringify(result).substring(0, 500));

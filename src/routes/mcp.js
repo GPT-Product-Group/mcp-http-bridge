@@ -20,6 +20,7 @@
 
 import { Router } from 'express';
 import crypto from 'crypto';
+import { getCustomerToken } from '../db.js';
 
 const router = Router();
 
@@ -38,7 +39,7 @@ const SERVER_CAPABILITIES = {
 };
 
 // Session 存储 - 存储 SSE 连接和 session 信息
-// key: sessionId, value: { res: SSE response object, createdAt: timestamp }
+// key: sessionId, value: { res: SSE response object, createdAt: timestamp, shopId: string }
 const sessions = new Map();
 
 /**
@@ -74,14 +75,19 @@ router.get('/sse', (req, res) => {
   console.log('Query params:', req.query);
   console.log('Headers:', JSON.stringify(req.headers, null, 2));
 
-  // 从 URL 参数或请求头获取 accessToken
-  const accessToken = req.query.access_token || req.query.accessToken ||
-                      req.headers['authorization'] || req.headers['x-access-token'];
+  // 从 URL 参数或请求头获取 accessToken 和 shop_id
+  let accessToken = req.query.access_token || req.query.accessToken ||
+                    req.headers['authorization'] || req.headers['x-access-token'];
+  const shopId = req.query.shop_id || req.query.shopId;
 
   if (accessToken) {
     console.log('AccessToken provided via URL/header:', accessToken.substring(0, 10) + '...');
   } else {
-    console.log('WARNING: No accessToken provided in URL or headers');
+    console.log('No accessToken in URL/headers, will try database lookup');
+  }
+
+  if (shopId) {
+    console.log('Shop ID provided:', shopId);
   }
 
   // 生成 session ID 用于关联此 SSE 连接
@@ -114,10 +120,11 @@ router.get('/sse', (req, res) => {
   res.write(`event: endpoint\n`);
   res.write(`data: ${messageEndpoint}\n\n`);
 
-  // 存储 session 信息，包括 SSE response 对象和 accessToken 用于后续发送响应
+  // 存储 session 信息，包括 SSE response 对象、accessToken 和 shopId 用于后续发送响应
   sessions.set(sessionId, {
     res: res,
     accessToken: accessToken || null,
+    shopId: shopId || null,
     createdAt: Date.now()
   });
   console.log(`Session stored. Active sessions: ${sessions.size}`);
@@ -223,16 +230,31 @@ router.post('/messages', async (req, res) => {
         break;
 
       case 'tools/call':
-        // 优先从 session 中获取 accessToken（SSE 连接时通过 URL 参数传递）
-        // 其次从请求头提取
-        const sessionToken = session.accessToken;
-        const headerToken = req.headers['authorization'] || req.headers['x-access-token'];
-        const sseToken = sessionToken || headerToken;
+        // 获取 token 的优先级：
+        // 1. session 中存储的 token（SSE 连接时通过 URL 参数传递）
+        // 2. 请求头中的 token
+        // 3. 从数据库获取（通过 sessionId）
+        let sseToken = session.accessToken;
+        const msgHeaderToken = req.headers['authorization'] || req.headers['x-access-token'];
+        
+        if (!sseToken && msgHeaderToken) {
+          sseToken = msgHeaderToken;
+        }
+        
+        // 如果还没有 token，尝试从数据库获取
+        if (!sseToken) {
+          const tokenRecord = getCustomerToken(sessionId);
+          if (tokenRecord && tokenRecord.access_token) {
+            sseToken = tokenRecord.access_token;
+            console.log('Token retrieved from database for session:', sessionId);
+          }
+        }
+        
         console.log('=== Token Debug ===');
-        console.log('Session accessToken:', sessionToken ? sessionToken.substring(0, 10) + '...' : 'null');
-        console.log('Header accessToken:', headerToken ? headerToken.substring(0, 10) + '...' : 'null');
+        console.log('Session accessToken:', session.accessToken ? session.accessToken.substring(0, 10) + '...' : 'null');
+        console.log('Header accessToken:', msgHeaderToken ? msgHeaderToken.substring(0, 10) + '...' : 'null');
         console.log('Final token:', sseToken ? sseToken.substring(0, 10) + '...' : 'null');
-        result = await handleToolsCall(mcpClient, params, { accessToken: sseToken });
+        result = await handleToolsCall(mcpClient, params, { accessToken: sseToken, sessionId });
         break;
 
       default:
@@ -357,9 +379,19 @@ async function handleMcpMessage(req, res) {
         break;
 
       case 'tools/call':
-        // 从请求头提取 accessToken
-        const httpToken = req.headers['authorization'] || req.headers['x-access-token'];
-        result = await handleToolsCall(mcpClient, params, { accessToken: httpToken });
+        // 从请求头提取 accessToken，或从数据库获取
+        let httpToken = req.headers['authorization'] || req.headers['x-access-token'];
+        
+        // 如果没有 token，尝试从数据库获取（使用 sessionId）
+        if (!httpToken && sessionId) {
+          const tokenRecord = getCustomerToken(sessionId);
+          if (tokenRecord && tokenRecord.access_token) {
+            httpToken = tokenRecord.access_token;
+            console.log('Token retrieved from database for session:', sessionId);
+          }
+        }
+        
+        result = await handleToolsCall(mcpClient, params, { accessToken: httpToken, sessionId });
         break;
 
       default:

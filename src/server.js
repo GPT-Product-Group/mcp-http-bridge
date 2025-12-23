@@ -1,6 +1,11 @@
 /**
  * MCP HTTP Bridge Server
  * 将 MCP 服务包装成标准 HTTP API，供 Dify/N8N 等平台调用
+ * 
+ * 增强功能：
+ * - 自动获取和存储客户 access token
+ * - 调用需要认证的工具时自动使用存储的 token
+ * - 支持 OAuth 认证流程
  */
 
 import express from 'express';
@@ -10,6 +15,7 @@ import MCPClient from './mcp-client.js';
 import toolsRouter from './routes/tools.js';
 import callRouter from './routes/call.js';
 import mcpRouter from './routes/mcp.js';
+import authRouter from './routes/auth.js';
 
 // 加载环境变量
 dotenv.config();
@@ -31,7 +37,10 @@ app.use((req, res, next) => {
 const mcpClient = new MCPClient({
   storefrontEndpoint: process.env.MCP_STOREFRONT_ENDPOINT,
   customerEndpoint: process.env.MCP_CUSTOMER_ENDPOINT,
-  accessToken: process.env.MCP_ACCESS_TOKEN
+  accessToken: process.env.MCP_ACCESS_TOKEN,
+  shopId: process.env.SHOPIFY_SHOP_ID,
+  clientId: process.env.SHOPIFY_CLIENT_ID,
+  redirectUri: process.env.OAUTH_REDIRECT_URI
 });
 
 // 将 MCP 客户端挂载到 app 上，供路由使用
@@ -40,6 +49,9 @@ app.set('mcpClient', mcpClient);
 // 路由
 app.use('/api/tools', toolsRouter);
 app.use('/api/call', callRouter);
+
+// OAuth 认证路由
+app.use('/auth', authRouter);
 
 // MCP 协议路由 (用于 Dify MCP HTTP 集成)
 app.use('/mcp', mcpRouter);
@@ -51,7 +63,9 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     config: {
       storefrontEndpoint: process.env.MCP_STOREFRONT_ENDPOINT ? 'configured' : 'not configured',
-      customerEndpoint: process.env.MCP_CUSTOMER_ENDPOINT ? 'configured' : 'not configured'
+      customerEndpoint: process.env.MCP_CUSTOMER_ENDPOINT ? 'configured' : 'not configured',
+      shopifyClientId: process.env.SHOPIFY_CLIENT_ID ? 'configured' : 'not configured',
+      shopifyShopId: process.env.SHOPIFY_SHOP_ID ? 'configured' : 'not configured'
     }
   });
 });
@@ -63,15 +77,29 @@ app.get('/', (req, res) => {
 
   res.json({
     name: 'MCP HTTP Bridge',
-    version: '1.0.0',
-    description: 'HTTP bridge for MCP (Model Context Protocol) services',
+    version: '1.1.0',
+    description: 'HTTP bridge for MCP (Model Context Protocol) services with automatic customer authentication',
     endpoints: {
       'GET /api/health': 'Health check',
       'GET /api/tools': 'List all available MCP tools',
       'POST /api/call': 'Call a specific MCP tool',
       'GET /mcp/sse': 'MCP SSE endpoint - establishes SSE connection and returns messages endpoint',
       'POST /mcp/messages?session_id=xxx': 'MCP SSE transport - receives requests and sends responses via SSE stream',
-      'POST /mcp/message': 'MCP JSON-RPC message endpoint (legacy)'
+      'POST /mcp/message': 'MCP JSON-RPC message endpoint (legacy)',
+      'GET /auth/login': 'Initiate OAuth flow (requires session_id and shop_id)',
+      'GET /auth/callback': 'OAuth callback handler',
+      'GET /auth/status': 'Check authentication status',
+      'GET /auth/url': 'Get OAuth URL without redirect'
+    },
+    authentication: {
+      description: 'Customer access tokens are automatically obtained and stored',
+      flow: [
+        '1. Call /auth/login?session_id=xxx&shop_id=xxx.myshopify.com to initiate OAuth',
+        '2. User completes authentication in browser',
+        '3. Token is automatically stored and used for subsequent API calls',
+        '4. Check status via /auth/status?session_id=xxx'
+      ],
+      auto_auth: 'When calling customer tools without a valid token, the API will return an auth_url for authentication'
     },
     dify_integration: {
       description: 'To add this service in Dify as an MCP Server (HTTP)',
@@ -88,11 +116,13 @@ app.get('/', (req, res) => {
         method: 'POST',
         body: {
           tool: 'tool_name (required)',
-          arguments: '{ ... } (optional)'
+          arguments: '{ ... } (optional)',
+          session_id: 'session_id (optional, for auto token retrieval)'
         },
         example: {
-          tool: 'search_products',
-          arguments: { query: 'shoes', limit: 10 }
+          tool: 'get_customer_orders',
+          arguments: { first: 10 },
+          session_id: 'my_session_123'
         }
       }
     }
@@ -110,7 +140,11 @@ app.use((req, res) => {
       'GET /api/tools',
       'POST /api/call',
       'GET /mcp/sse',
-      'POST /mcp/message'
+      'POST /mcp/message',
+      'GET /auth/login',
+      'GET /auth/callback',
+      'GET /auth/status',
+      'GET /auth/url'
     ]
   });
 });
@@ -127,7 +161,8 @@ app.use((err, req, res, next) => {
 // 启动服务器
 app.listen(PORT, async () => {
   console.log('========================================');
-  console.log('  MCP HTTP Bridge Server');
+  console.log('  MCP HTTP Bridge Server v1.1.0');
+  console.log('  With Customer Authentication Support');
   console.log('========================================');
   console.log(`  Server running at http://localhost:${PORT}`);
   console.log('');
@@ -135,6 +170,12 @@ app.listen(PORT, async () => {
   console.log(`    GET  http://localhost:${PORT}/api/health`);
   console.log(`    GET  http://localhost:${PORT}/api/tools`);
   console.log(`    POST http://localhost:${PORT}/api/call`);
+  console.log('');
+  console.log('  OAuth Endpoints:');
+  console.log(`    GET  http://localhost:${PORT}/auth/login`);
+  console.log(`    GET  http://localhost:${PORT}/auth/callback`);
+  console.log(`    GET  http://localhost:${PORT}/auth/status`);
+  console.log(`    GET  http://localhost:${PORT}/auth/url`);
   console.log('');
   console.log('  Dify MCP HTTP Endpoints:');
   console.log(`    GET  http://localhost:${PORT}/mcp/sse     (SSE for service discovery)`);
@@ -157,6 +198,13 @@ app.listen(PORT, async () => {
   } else {
     console.log('\nNote: No MCP endpoints configured.');
     console.log('Set MCP_STOREFRONT_ENDPOINT and/or MCP_CUSTOMER_ENDPOINT in .env file.');
+  }
+
+  // 显示认证配置状态
+  if (process.env.SHOPIFY_CLIENT_ID) {
+    console.log('\n✅ Shopify Client ID configured - OAuth authentication enabled');
+  } else {
+    console.log('\n⚠️  SHOPIFY_CLIENT_ID not configured - OAuth authentication disabled');
   }
 });
 

@@ -1,7 +1,7 @@
 {
   "name": "mcp-http-bridge",
-  "version": "1.0.0",
-  "description": "HTTP bridge service for MCP (Model Context Protocol) - enables Dify/N8N to call MCP services via HTTP API",
+  "version": "1.1.0",
+  "description": "HTTP bridge service for MCP (Model Context Protocol) - enables Dify/N8N to call MCP services via HTTP API with automatic customer authentication",
   "type": "module",
   "main": "src/server.js",
   "scripts": {
@@ -15,11 +15,14 @@
     "n8n",
     "shopify",
     "ai",
-    "bridge"
+    "bridge",
+    "oauth",
+    "authentication"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "better-sqlite3": "^11.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2"
