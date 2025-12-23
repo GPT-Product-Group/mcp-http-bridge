@@ -562,10 +562,28 @@ async function handleToolsCall(mcpClient, params, options = {}) {
     console.log('Using dynamic accessToken for tool call');
   }
 
+  // 添加 sessionId 到调用选项
+  callOptions.sessionId = options.sessionId;
+
   console.log(`Calling tool: ${name}`);
   console.log('Arguments:', JSON.stringify(parsedArgs, null, 2));
+  console.log('Call options:', JSON.stringify({ ...callOptions, accessToken: callOptions.accessToken ? '[REDACTED]' : null }, null, 2));
 
   const result = await mcpClient.callTool(name, parsedArgs, callOptions);
+
+  // 检查是否是认证要求错误
+  if (result && result.error && result.error.type === 'auth_required') {
+    console.log('Tool returned auth_required, formatting response with auth URL');
+    // 返回包含认证链接的消息
+    return {
+      content: [
+        {
+          type: 'text',
+          text: result.error.message || `需要认证。请访问以下链接完成授权：${result.error.auth_url}`
+        }
+      ]
+    };
+  }
 
   // 返回 MCP 标准格式的工具调用结果
   return {

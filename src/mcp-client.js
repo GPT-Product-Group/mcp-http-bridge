@@ -258,6 +258,12 @@ class MCPClient {
     // 获取 token
     let token = await this._getAccessToken(options);
 
+    // 如果没有 token，直接返回认证要求（不调用 API）
+    if (!token) {
+      console.log('No access token available, returning auth requirement');
+      return this._generateAuthRequiredResponse(options);
+    }
+
     // 确保 token 有 Bearer 前缀（Shopify Customer Account API 需要）
     if (token && !token.toLowerCase().startsWith('bearer ')) {
       token = `Bearer ${token}`;
@@ -278,50 +284,107 @@ class MCPClient {
         headers
       );
 
-      return response.result || response;
+      const result = response.result || response;
+
+      // 检查响应是否包含"需要登录"类的消息（Shopify 可能返回成功但内容是认证提示）
+      if (this._isAuthRequiredResponse(result)) {
+        console.log('Response indicates auth required, returning auth URL');
+        return this._generateAuthRequiredResponse(options);
+      }
+
+      return result;
     } catch (error) {
       // 处理 401 未授权错误 - 返回认证 URL
       if (error.status === 401) {
-        console.log('Unauthorized, generating auth URL...');
-        
-        // 生成认证 URL
-        const sessionId = options.sessionId || `session_${Date.now()}`;
-        
-        if (this.shopId && this.clientId) {
-          try {
-            const authResult = await generateAuthUrl({
-              sessionId,
-              shopId: this.shopId,
-              clientId: this.clientId,
-              redirectUri: this.redirectUri,
-              scopes: ['customer_read_customers', 'customer_read_orders']
-            });
-
-            return {
-              error: {
-                type: 'auth_required',
-                message: 'Authentication required to access customer data',
-                auth_url: authResult.url,
-                session_id: sessionId
-              }
-            };
-          } catch (authError) {
-            console.error('Failed to generate auth URL:', authError);
-          }
-        }
-
-        return {
-          error: {
-            type: 'auth_required',
-            message: 'Authentication required. Please configure SHOPIFY_CLIENT_ID and shop_id to enable automatic auth URL generation.',
-            data: 'You need to authorize the app to access your customer data.'
-          }
-        };
+        console.log('Unauthorized (401), generating auth URL...');
+        return this._generateAuthRequiredResponse(options);
       }
 
       // 其他错误重新抛出
       throw error;
     }
+  }
+
+  /**
+   * 检查响应是否表示需要认证
+   * @private
+   */
+  _isAuthRequiredResponse(result) {
+    if (!result) return false;
+
+    // 检查 content 数组中的文本
+    if (result.content && Array.isArray(result.content)) {
+      for (const item of result.content) {
+        if (item.type === 'text' && item.text) {
+          const text = item.text.toLowerCase();
+          // 检查常见的认证提示关键词
+          if (text.includes('login') || 
+              text.includes('authenticate') || 
+              text.includes('sign in') ||
+              text.includes('登录') ||
+              text.includes('认证') ||
+              text.includes('授权')) {
+            return true;
+          }
+        }
+      }
+    }
+
+    // 检查直接的文本响应
+    if (typeof result === 'string') {
+      const text = result.toLowerCase();
+      if (text.includes('login') || text.includes('登录')) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * 生成认证要求响应
+   * @private
+   */
+  async _generateAuthRequiredResponse(options = {}) {
+    const sessionId = options.sessionId || `session_${Date.now()}`;
+    
+    if (this.shopId && this.clientId && this.redirectUri) {
+      try {
+        const authResult = await generateAuthUrl({
+          sessionId,
+          shopId: this.shopId,
+          clientId: this.clientId,
+          redirectUri: this.redirectUri,
+          scopes: ['customer_read_customers', 'customer_read_orders']
+        });
+
+        console.log('Generated auth URL:', authResult.url);
+
+        return {
+          error: {
+            type: 'auth_required',
+            message: `您需要先登录才能查看订单信息。请点击以下链接完成授权：\n\n${authResult.url}`,
+            auth_url: authResult.url,
+            session_id: sessionId
+          }
+        };
+      } catch (authError) {
+        console.error('Failed to generate auth URL:', authError);
+      }
+    }
+
+    // 如果无法生成认证 URL，返回配置提示
+    return {
+      error: {
+        type: 'auth_required',
+        message: '需要客户认证才能访问订单数据。请确保已配置 SHOPIFY_CLIENT_ID、SHOPIFY_SHOP_ID 和 OAUTH_REDIRECT_URI 环境变量。',
+        config_required: {
+          SHOPIFY_CLIENT_ID: this.clientId ? 'configured' : 'missing',
+          SHOPIFY_SHOP_ID: this.shopId ? 'configured' : 'missing',
+          OAUTH_REDIRECT_URI: this.redirectUri ? 'configured' : 'missing'
+        }
+      }
+    };
   }
 
   /**
