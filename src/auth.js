@@ -74,6 +74,13 @@ export async function generateAuthUrl({ sessionId, shopId, clientId, redirectUri
     });
   }
 
+  // 统一处理字段名（数据库返回下划线格式，代码使用驼峰格式）
+  const authorizationUrl = urls.authorizationUrl || urls.authorization_url;
+  
+  if (!authorizationUrl) {
+    throw new Error(`Authorization URL not found for shop: ${shopId}. URLs: ${JSON.stringify(urls)}`);
+  }
+
   // 生成 PKCE 参数
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = generateCodeChallenge(codeVerifier);
@@ -95,7 +102,7 @@ export async function generateAuthUrl({ sessionId, shopId, clientId, redirectUri
     code_challenge_method: 'S256'
   });
 
-  const authUrl = `${urls.authorization_url}?${authParams.toString()}`;
+  const authUrl = `${authorizationUrl}?${authParams.toString()}`;
 
   console.log('Generated auth URL:', authUrl);
 
@@ -124,6 +131,13 @@ export async function exchangeCodeForToken({ code, state, codeVerifier, shopId, 
     throw new Error(`Customer account URLs not found for shop: ${shopId}`);
   }
 
+  // 统一处理字段名（数据库返回下划线格式，代码使用驼峰格式）
+  const tokenUrl = urls.tokenUrl || urls.token_url;
+  
+  if (!tokenUrl) {
+    throw new Error(`Token URL not found for shop: ${shopId}`);
+  }
+
   const requestBody = new URLSearchParams({
     grant_type: 'authorization_code',
     client_id: clientId,
@@ -132,10 +146,10 @@ export async function exchangeCodeForToken({ code, state, codeVerifier, shopId, 
     code_verifier: codeVerifier
   });
 
-  console.log('Exchanging code for token at:', urls.token_url);
+  console.log('Exchanging code for token at:', tokenUrl);
   console.log('Request body:', requestBody.toString());
 
-  const response = await fetch(urls.token_url, {
+  const response = await fetch(tokenUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded'

@@ -363,7 +363,11 @@ class MCPClient {
         return {
           error: {
             type: 'auth_required',
-            message: `您需要先登录才能查看订单信息。请点击以下链接完成授权：\n\n${authResult.url}`,
+            message: `您需要先登录才能查看订单信息。请复制以下链接到浏览器中打开完成授权：
+
+${authResult.url}
+
+授权完成后，请再次查询订单。`,
             auth_url: authResult.url,
             session_id: sessionId
           }
