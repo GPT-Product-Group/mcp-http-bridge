@@ -20,7 +20,7 @@
 
 import { Router } from 'express';
 import crypto from 'crypto';
-import { getCustomerToken } from '../db.js';
+import { getCustomerToken, storeCustomerToken } from '../db.js';
 
 const router = Router();
 
@@ -41,6 +41,39 @@ const SERVER_CAPABILITIES = {
 // Session 存储 - 存储 SSE 连接和 session 信息
 // key: sessionId, value: { res: SSE response object, createdAt: timestamp, shopId: string }
 const sessions = new Map();
+
+/**
+ * 去掉 Bearer 前缀，确保持久化存储时只存访问令牌本身
+ */
+function stripBearerPrefix(token) {
+  if (!token) return token;
+  return token.toLowerCase().startsWith('bearer ')
+    ? token.slice(7)
+    : token;
+}
+
+/**
+ * 将从客户端传入的 token 持久化，方便后续自动复用
+ * 仅在 token 来源不是数据库时持久化
+ */
+function persistIncomingToken({ token, sessionId, shopId, source }) {
+  if (!token) return;
+  if (!shopId) {
+    console.warn('Skip storing token: missing shopId for session', sessionId);
+    return;
+  }
+  if (source === 'db') return;
+
+  try {
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30); // 默认保存 30 天，便于复用
+    const normalizedToken = stripBearerPrefix(token);
+    storeCustomerToken(sessionId, shopId, normalizedToken, expiresAt);
+    console.log(`Stored incoming token for session ${sessionId} (source: ${source})`);
+  } catch (err) {
+    console.error('Failed to store incoming token:', err);
+  }
+}
 
 /**
  * 生成 Session ID
@@ -235,10 +268,12 @@ router.post('/messages', async (req, res) => {
         // 2. 请求头中的 token
         // 3. 从数据库获取（通过 sessionId）
         let sseToken = session.accessToken;
+        let tokenSource = sseToken ? 'session_param' : null;
         const msgHeaderToken = req.headers['authorization'] || req.headers['x-access-token'];
         
         if (!sseToken && msgHeaderToken) {
           sseToken = msgHeaderToken;
+          tokenSource = 'request_header';
         }
         
         // 如果还没有 token，尝试从数据库获取
@@ -246,6 +281,7 @@ router.post('/messages', async (req, res) => {
           const tokenRecord = getCustomerToken(sessionId);
           if (tokenRecord && tokenRecord.access_token) {
             sseToken = tokenRecord.access_token;
+            tokenSource = 'db';
             console.log('Token retrieved from database for session:', sessionId);
           }
         }
@@ -254,6 +290,18 @@ router.post('/messages', async (req, res) => {
         console.log('Session accessToken:', session.accessToken ? session.accessToken.substring(0, 10) + '...' : 'null');
         console.log('Header accessToken:', msgHeaderToken ? msgHeaderToken.substring(0, 10) + '...' : 'null');
         console.log('Final token:', sseToken ? sseToken.substring(0, 10) + '...' : 'null');
+        
+        // 将客户端传入的 token 持久化，便于后续自动复用（需要 shopId）
+        if (sseToken) {
+          const shopId = session.shopId || params?.shop_id || params?.shopId || req.query.shop_id || req.query.shopId;
+          persistIncomingToken({
+            token: sseToken,
+            sessionId,
+            shopId,
+            source: tokenSource || 'unknown'
+          });
+        }
+
         result = await handleToolsCall(mcpClient, params, { accessToken: sseToken, sessionId });
         break;
 
