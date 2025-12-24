@@ -190,6 +190,13 @@ class MCPClient {
       return this.accessToken;
     }
 
+    // 5. 兜底：直接从环境变量读取 MCP_ACCESS_TOKEN
+    if (process.env.MCP_ACCESS_TOKEN) {
+      console.log('Using MCP_ACCESS_TOKEN from environment');
+      this.accessToken = process.env.MCP_ACCESS_TOKEN;
+      return this.accessToken;
+    }
+
     console.log('No access token available');
     return null;
   }
