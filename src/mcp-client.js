@@ -113,6 +113,12 @@ class MCPClient {
       );
 
       const toolsData = response.result?.tools || [];
+
+      // 移除旧的 customer tools，避免重复
+      const oldCustomerToolNames = new Set(this.customerTools.map(t => t.name));
+      this.tools = this.tools.filter(t => !oldCustomerToolNames.has(t.name));
+
+      // 设置新的 customer tools
       this.customerTools = this._formatToolsData(toolsData);
       this.tools = [...this.tools, ...this.customerTools];
 
@@ -216,6 +222,19 @@ class MCPClient {
     } else if (this.customerTools.some(t => t.name === toolName)) {
       return this._callCustomerTool(toolName, toolArgs, options);
     } else {
+      // 工具未找到 - 如果 customerTools 为空且有 token，尝试重新连接 Customer MCP
+      if (this.customerTools.length === 0 && this.customerEndpoint) {
+        console.log('Customer tools not loaded, attempting to reconnect...');
+        try {
+          await this.connectToCustomerServer(options);
+          // 重新检查工具是否存在
+          if (this.customerTools.some(t => t.name === toolName)) {
+            return this._callCustomerTool(toolName, toolArgs, options);
+          }
+        } catch (error) {
+          console.error('Failed to reconnect to Customer MCP:', error.message);
+        }
+      }
       throw new Error(`Tool "${toolName}" not found. Available tools: ${this.tools.map(t => t.name).join(', ')}`);
     }
   }
