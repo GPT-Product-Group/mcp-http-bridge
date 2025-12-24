@@ -81,6 +81,7 @@ class MCPClient {
    * 连接到客户账户 MCP 服务器并获取可用工具列表
    * @param {Object} options - 可选配置
    * @param {string} options.sessionId - 会话 ID (用于获取存储的 token)
+   * @param {boolean} options._isRetry - 内部标记，是否是重试请求
    * @returns {Promise<Array>} 可用工具数组
    */
   async connectToCustomerServer(options = {}) {
@@ -126,6 +127,25 @@ class MCPClient {
       return this.customerTools;
     } catch (error) {
       console.error("Failed to connect to Customer MCP:", error.message);
+
+      // 检查是否是会话终止错误，如果是且不是重试请求，则清除缓存并重试
+      if (this._isSessionTerminatedError(error) && !options._isRetry) {
+        console.log('Session terminated during tools/list, clearing cache and retrying...');
+
+        // 清除已缓存的工具列表
+        this._clearCustomerTools();
+
+        // 等待一小段时间后重试（让服务器有时间建立新会话）
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        try {
+          return await this.connectToCustomerServer({ ...options, _isRetry: true });
+        } catch (retryError) {
+          console.error('Retry failed after session terminated:', retryError.message);
+          throw error; // 抛出原始错误
+        }
+      }
+
       throw error;
     }
   }
@@ -276,6 +296,7 @@ class MCPClient {
    * @param {Object} options - 可选配置
    * @param {string} options.accessToken - 动态传递的访问令牌（优先于实例配置）
    * @param {string} options.sessionId - 会话 ID
+   * @param {boolean} options._isRetry - 内部标记，是否是重试请求
    */
   async _callCustomerTool(toolName, toolArgs, options = {}) {
     console.log(`Calling customer tool: ${toolName}`, toolArgs);
@@ -310,8 +331,69 @@ class MCPClient {
       const result = response.result || response;
       return result;
     } catch (error) {
+      // 检查是否是会话终止错误，如果是且不是重试请求，则尝试重新连接
+      if (this._isSessionTerminatedError(error) && !options._isRetry) {
+        console.log('Session terminated by server, attempting to reconnect...');
+
+        // 清除已缓存的工具列表
+        this._clearCustomerTools();
+
+        try {
+          // 重新连接到 Customer MCP 服务器
+          await this.connectToCustomerServer(options);
+
+          // 重试工具调用（标记为重试以防止无限循环）
+          console.log('Reconnected successfully, retrying tool call...');
+          return await this._callCustomerTool(toolName, toolArgs, { ...options, _isRetry: true });
+        } catch (reconnectError) {
+          console.error('Failed to reconnect after session terminated:', reconnectError.message);
+          throw error; // 抛出原始错误
+        }
+      }
       throw error;
     }
+  }
+
+  /**
+   * 检查错误是否为会话终止错误
+   * @private
+   * @param {Error} error - 错误对象
+   * @returns {boolean} 是否为会话终止错误
+   */
+  _isSessionTerminatedError(error) {
+    if (!error) return false;
+
+    // 检查错误消息是否包含会话终止相关的关键词
+    const message = (error.message || '').toLowerCase();
+    const sessionTerminatedPatterns = [
+      'session terminated',
+      'session expired',
+      'session not found',
+      'invalid session',
+      'session closed'
+    ];
+
+    if (sessionTerminatedPatterns.some(pattern => message.includes(pattern))) {
+      return true;
+    }
+
+    // 检查错误代码 -32600 (Invalid Request) 且消息包含 session 相关内容
+    if (error.code === -32600 && message.includes('session')) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * 清除已缓存的 Customer 工具列表
+   * @private
+   */
+  _clearCustomerTools() {
+    const oldCustomerToolNames = new Set(this.customerTools.map(t => t.name));
+    this.tools = this.tools.filter(t => !oldCustomerToolNames.has(t.name));
+    this.customerTools = [];
+    console.log('Cleared customer tools cache');
   }
 
   /**
