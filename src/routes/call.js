@@ -70,6 +70,12 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // 如果还没有 token，使用环境变量中的 MCP_ACCESS_TOKEN（兜底）
+    if (!dynamicToken && process.env.MCP_ACCESS_TOKEN) {
+      dynamicToken = process.env.MCP_ACCESS_TOKEN;
+      console.log('Using MCP_ACCESS_TOKEN from environment');
+    }
+
     if (dynamicToken) {
       console.log('Using accessToken:', dynamicToken.substring(0, 15) + '...');
     }
