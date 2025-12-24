@@ -607,7 +607,7 @@ async function handleToolsCall(mcpClient, params, options = {}) {
   // 确保已连接
   if (mcpClient.getTools().length === 0) {
     console.log('No tools loaded, connecting to MCP servers...');
-    await mcpClient.connectAll();
+    await mcpClient.connectAll(options);
   }
 
   // 解析参数（处理可能的字符串格式）
