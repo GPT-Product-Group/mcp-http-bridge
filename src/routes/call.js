@@ -1,10 +1,11 @@
 /**
  * Tool Call API 路由
  * POST /api/call - 调用指定的 MCP 工具
- * 
+ *
  * 增强功能：
  * - 支持通过 session_id 自动获取存储的 customer token
  * - 调用需要认证的工具时自动使用 token
+ * - 支持 Shopify Admin API (admin_token 参数)
  */
 
 import { Router } from 'express';
@@ -15,21 +16,28 @@ const router = Router();
 /**
  * POST /api/call
  * 调用指定的 MCP 工具
- * 
+ *
  * Request Body:
  * {
  *   "tool": "tool_name",           // 必填：工具名称
  *   "arguments": { ... },          // 可选：工具参数
  *   "session_id": "xxx",           // 可选：会话 ID（用于自动获取存储的 token）
- *   "accessToken": "xxx"           // 可选：直接传递 access token（优先级最高）
+ *   "accessToken": "xxx",          // 可选：直接传递 access token（优先级最高）
+ *   "admin_token": "shpat_xxx",    // 可选：Shopify Admin API Token
+ *   "shop_id": "xxx.myshopify.com" // 可选：店铺域名（Admin API 必须）
  * }
- * 
+ *
+ * Request Headers (alternative):
+ * - X-Admin-Token: shpat_xxx
+ * - X-Shopify-Access-Token: shpat_xxx
+ * - X-Shop-Id: xxx.myshopify.com
+ *
  * Response:
  * {
  *   "success": true,
  *   "result": { ... }              // 工具返回结果
  * }
- * 
+ *
  * 如果需要认证但没有有效 token，返回：
  * {
  *   "success": false,
@@ -52,11 +60,24 @@ router.post('/', async (req, res) => {
     console.log('\n========== Incoming Request ==========');
     console.log('Request body:', JSON.stringify(req.body, null, 2));
 
-    const { tool, arguments: toolArgs, accessToken, session_id } = req.body;
+    const { tool, arguments: toolArgs, accessToken, session_id, admin_token, shop_id } = req.body;
 
     // 从请求头或请求体提取 accessToken（请求体优先）
     const headerToken = req.headers['authorization'] || req.headers['x-access-token'];
     let dynamicToken = accessToken || headerToken;
+
+    // 从请求头或请求体提取 adminToken 和 shopId
+    const headerAdminToken = req.headers['x-admin-token'] || req.headers['x-shopify-access-token'];
+    const headerShopId = req.headers['x-shop-id'];
+    const adminToken = admin_token || headerAdminToken;
+    const shopId = shop_id || headerShopId;
+
+    if (adminToken) {
+      console.log('Admin token provided:', adminToken.substring(0, 15) + '...');
+    }
+    if (shopId) {
+      console.log('Shop ID provided:', shopId);
+    }
 
     // 如果没有直接传递 token，尝试从数据库获取
     if (!dynamicToken && session_id) {
@@ -129,16 +150,24 @@ router.post('/', async (req, res) => {
     // 确保已连接
     if (mcpClient.getTools().length === 0) {
       console.log('No tools loaded, connecting to MCP servers...');
-      await mcpClient.connectAll({ sessionId: session_id, accessToken: dynamicToken });
+      await mcpClient.connectAll({ sessionId: session_id, accessToken: dynamicToken, adminToken, shopId });
+    }
+
+    // 如果有 adminToken，确保加载 Admin 工具
+    if (adminToken && mcpClient.adminTools.length === 0) {
+      console.log('Loading Admin API tools...');
+      mcpClient.loadAdminTools({ adminToken });
     }
 
     // 调用工具
     console.log(`Calling tool: ${tool}`);
     console.log('Arguments:', JSON.stringify(parsedArgs, null, 2));
 
-    // 构建调用选项，包含动态 token 和 session_id
+    // 构建调用选项，包含动态 token、admin token 和 session_id
     const callOptions = {
       accessToken: dynamicToken,
+      adminToken: adminToken,
+      shopId: shopId,
       sessionId: session_id
     };
 

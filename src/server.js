@@ -77,8 +77,8 @@ app.get('/', (req, res) => {
 
   res.json({
     name: 'MCP HTTP Bridge',
-    version: '1.1.0',
-    description: 'HTTP bridge for MCP (Model Context Protocol) services with automatic customer authentication',
+    version: '1.2.0',
+    description: 'HTTP bridge for MCP (Model Context Protocol) services with automatic customer authentication and Shopify Admin API support',
     endpoints: {
       'GET /api/health': 'Health check',
       'GET /api/tools': 'List all available MCP tools',
@@ -101,14 +101,29 @@ app.get('/', (req, res) => {
       ],
       auto_auth: 'When calling customer tools without a valid token, the API will return an auth_url for authentication'
     },
+    admin_api: {
+      description: 'Shopify Admin API support for order management, product management, etc.',
+      usage: 'Pass admin_token and shop_id in the SSE URL to enable Admin API tools',
+      sse_url_example: `${protocol}://${host}/mcp/sse?admin_token=shpat_xxx&shop_id=xxx.myshopify.com`,
+      available_tools: [
+        'admin_get_orders - Get order list',
+        'admin_get_order_by_name - Get order by order number (e.g. #1001)',
+        'admin_get_products - Get product list',
+        'admin_get_refunds - Get refund records',
+        'admin_get_shop_info - Get shop information'
+      ],
+      note: 'Admin Token (shpat_...) is different from Storefront Token (shpss_...) or Customer Account Token'
+    },
     dify_integration: {
       description: 'To add this service in Dify as an MCP Server (HTTP)',
       sse_url: `${protocol}://${host}/mcp/sse`,
+      sse_url_with_admin: `${protocol}://${host}/mcp/sse?admin_token=YOUR_ADMIN_TOKEN&shop_id=YOUR_SHOP.myshopify.com`,
       instructions: [
         '1. In Dify, go to Tools > MCP',
         '2. Click "Add MCP Server (HTTP)"',
         '3. Enter the SSE URL shown above',
-        '4. Dify will automatically discover the message endpoint'
+        '4. For Admin API access, include admin_token and shop_id in the URL',
+        '5. Dify will automatically discover the message endpoint'
       ]
     },
     usage: {
@@ -123,6 +138,17 @@ app.get('/', (req, res) => {
           tool: 'get_customer_orders',
           arguments: { first: 10 },
           session_id: 'my_session_123'
+        }
+      },
+      '/api/call (Admin API)': {
+        method: 'POST',
+        headers: {
+          'X-Admin-Token': 'shpat_xxx',
+          'X-Shop-Id': 'xxx.myshopify.com'
+        },
+        body: {
+          tool: 'admin_get_orders',
+          arguments: { first: 10 }
         }
       }
     }
@@ -161,8 +187,8 @@ app.use((err, req, res, next) => {
 // 启动服务器
 app.listen(PORT, async () => {
   console.log('========================================');
-  console.log('  MCP HTTP Bridge Server v1.1.0');
-  console.log('  With Customer Authentication Support');
+  console.log('  MCP HTTP Bridge Server v1.2.0');
+  console.log('  With Customer Auth & Admin API Support');
   console.log('========================================');
   console.log(`  Server running at http://localhost:${PORT}`);
   console.log('');
@@ -181,8 +207,11 @@ app.listen(PORT, async () => {
   console.log(`    GET  http://localhost:${PORT}/mcp/sse     (SSE for service discovery)`);
   console.log(`    POST http://localhost:${PORT}/mcp/message (JSON-RPC messages)`);
   console.log('');
-  console.log('  To add in Dify:');
-  console.log(`    Use SSE URL: http://localhost:${PORT}/mcp/sse`);
+  console.log('  To add in Dify (Basic):');
+  console.log(`    SSE URL: http://localhost:${PORT}/mcp/sse`);
+  console.log('');
+  console.log('  To add in Dify (with Admin API):');
+  console.log(`    SSE URL: http://localhost:${PORT}/mcp/sse?admin_token=shpat_xxx&shop_id=xxx.myshopify.com`);
   console.log('========================================');
 
   // 启动时尝试连接 MCP 服务器

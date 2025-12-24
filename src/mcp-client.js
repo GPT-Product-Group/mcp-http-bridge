@@ -2,9 +2,11 @@
  * MCP Client - 增强版
  * 用于通过 HTTP 调用 MCP (Model Context Protocol) 服务
  * 支持自动获取和使用客户 access token
+ * 支持 Shopify Admin API 直接调用 (shpat_... token)
  */
 
 import { getCustomerToken, getCustomerTokenByShop } from './db.js';
+import { ADMIN_TOOLS, callAdminTool, isAdminTool } from './admin-api.js';
 
 class MCPClient {
   /**
@@ -24,10 +26,11 @@ class MCPClient {
     this.shopId = options.shopId || "";
     this.clientId = options.clientId || process.env.SHOPIFY_CLIENT_ID || "";
     this.redirectUri = options.redirectUri || process.env.OAUTH_REDIRECT_URI || "";
-    
+
     this.tools = [];
     this.storefrontTools = [];
     this.customerTools = [];
+    this.adminTools = []; // Admin API 工具
   }
 
   /**
@@ -131,6 +134,38 @@ class MCPClient {
   }
 
   /**
+   * 加载 Admin API 工具
+   * Admin 工具是内置的，不需要连接外部服务器
+   * @param {Object} options - 可选配置
+   * @param {string} options.adminToken - Admin API Token
+   * @returns {Array} Admin 工具数组
+   */
+  loadAdminTools(options = {}) {
+    // 如果提供了 adminToken，加载 Admin 工具
+    if (options.adminToken) {
+      console.log('Loading Admin API tools...');
+
+      // 移除旧的 admin tools，避免重复
+      const oldAdminToolNames = new Set(this.adminTools.map(t => t.name));
+      this.tools = this.tools.filter(t => !oldAdminToolNames.has(t.name));
+
+      // 设置新的 admin tools
+      this.adminTools = ADMIN_TOOLS.map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        input_schema: tool.input_schema
+      }));
+      this.tools = [...this.tools, ...this.adminTools];
+
+      console.log(`Loaded ${this.adminTools.length} admin tools`);
+    } else {
+      console.log('No adminToken provided, skipping Admin API tools');
+    }
+
+    return this.adminTools;
+  }
+
+  /**
    * 连接到所有配置的 MCP 服务器
    * @param {Object} options - 可选配置
    * @returns {Promise<Array>} 所有可用工具的数组
@@ -139,6 +174,7 @@ class MCPClient {
     this.tools = [];
     this.storefrontTools = [];
     this.customerTools = [];
+    this.adminTools = [];
 
     const results = await Promise.allSettled([
       this.connectToStorefrontServer(),
@@ -152,6 +188,9 @@ class MCPClient {
         console.warn(`${serverName} MCP connection failed:`, result.reason?.message);
       }
     });
+
+    // 加载 Admin API 工具（如果有 adminToken）
+    this.loadAdminTools(options);
 
     return this.tools;
   }
@@ -212,10 +251,17 @@ class MCPClient {
    * @param {Object} toolArgs - 工具参数
    * @param {Object} options - 可选配置
    * @param {string} options.accessToken - 动态传递的访问令牌（优先于实例配置）
+   * @param {string} options.adminToken - Admin API Token (用于 admin_ 工具)
+   * @param {string} options.shopId - 店铺域名 (用于 Admin API 调用)
    * @param {string} options.sessionId - 会话 ID (用于自动获取 token)
    * @returns {Promise<Object>} 工具调用结果
    */
   async callTool(toolName, toolArgs = {}, options = {}) {
+    // 检查是否是 Admin API 工具
+    if (isAdminTool(toolName)) {
+      return this._callAdminTool(toolName, toolArgs, options);
+    }
+
     // 确定工具属于哪个服务器
     if (this.storefrontTools.some(t => t.name === toolName)) {
       return this._callStorefrontTool(toolName, toolArgs);
@@ -235,8 +281,41 @@ class MCPClient {
           console.error('Failed to reconnect to Customer MCP:', error.message);
         }
       }
+
+      // 如果是 admin_ 工具但未加载，尝试加载
+      if (isAdminTool(toolName) && options.adminToken) {
+        this.loadAdminTools(options);
+        if (this.adminTools.some(t => t.name === toolName)) {
+          return this._callAdminTool(toolName, toolArgs, options);
+        }
+      }
+
       throw new Error(`Tool "${toolName}" not found. Available tools: ${this.tools.map(t => t.name).join(', ')}`);
     }
+  }
+
+  /**
+   * 调用 Admin API 工具
+   * @private
+   * @param {string} toolName - 工具名称
+   * @param {Object} toolArgs - 工具参数
+   * @param {Object} options - 可选配置
+   */
+  async _callAdminTool(toolName, toolArgs, options = {}) {
+    console.log(`Calling Admin API tool: ${toolName}`, toolArgs);
+
+    const adminToken = options.adminToken;
+    const shopId = options.shopId || this.shopId;
+
+    if (!adminToken) {
+      throw new Error('Admin token is required for Admin API tools. Please provide admin_token in the URL or parameters.');
+    }
+
+    if (!shopId) {
+      throw new Error('Shop ID is required for Admin API tools. Please provide shop_id in the URL or parameters.');
+    }
+
+    return callAdminTool(toolName, toolArgs, shopId, adminToken);
   }
 
   /**
