@@ -395,7 +395,18 @@ ${authResult.url}
    * 发送 JSON-RPC 请求
    * @private
    */
-  async _makeJsonRpcRequest(endpoint, method, params, headers) {
+  async _makeJsonRpcRequest(endpoint, method, params, headers = {}) {
+    // 默认附加 MCP_ACCESS_TOKEN 作为授权头，除非调用方已经传入 Authorization
+    const finalHeaders = { ...headers };
+    if (!finalHeaders.Authorization && !finalHeaders.authorization && this.accessToken) {
+      let token = this.accessToken;
+      if (!token.toLowerCase().startsWith('bearer ')) {
+        token = `Bearer ${token}`;
+      }
+      finalHeaders.Authorization = token;
+      console.log('Using default MCP access token from configuration');
+    }
+
     const requestBody = {
       jsonrpc: "2.0",
       method: method,
@@ -410,7 +421,7 @@ ${authResult.url}
 
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: headers,
+      headers: finalHeaders,
       body: JSON.stringify(requestBody)
     });
 
