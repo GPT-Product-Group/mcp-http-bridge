@@ -244,6 +244,42 @@ router.post('/messages', async (req, res) => {
     return res.status(202).send('Accepted');
   }
 
+  // 获取 token 的优先级（统一处理，用于 tools/list 和 tools/call）：
+  // 1. session 中存储的 token（SSE 连接时通过 URL 参数传递）
+  // 2. 请求头中的 token
+  // 3. 从数据库获取（通过 sessionId）
+  // 4. 从环境变量获取 MCP_ACCESS_TOKEN（兜底）
+  let sseToken = session.accessToken;
+  let tokenSource = sseToken ? 'session_param' : null;
+  const msgHeaderToken = req.headers['authorization'] || req.headers['x-access-token'];
+
+  if (!sseToken && msgHeaderToken) {
+    sseToken = msgHeaderToken;
+    tokenSource = 'request_header';
+  }
+
+  // 如果还没有 token，尝试从数据库获取
+  if (!sseToken) {
+    const tokenRecord = getCustomerToken(sessionId);
+    if (tokenRecord && tokenRecord.access_token) {
+      sseToken = tokenRecord.access_token;
+      tokenSource = 'db';
+      console.log('Token retrieved from database for session:', sessionId);
+    }
+  }
+
+  // 如果还没有 token，使用环境变量中的 MCP_ACCESS_TOKEN（兜底）
+  if (!sseToken && process.env.MCP_ACCESS_TOKEN) {
+    sseToken = process.env.MCP_ACCESS_TOKEN;
+    tokenSource = 'env';
+    console.log('Using MCP_ACCESS_TOKEN from environment');
+  }
+
+  console.log('=== Token Debug ===');
+  console.log('Session accessToken:', session.accessToken ? session.accessToken.substring(0, 10) + '...' : 'null');
+  console.log('Header accessToken:', msgHeaderToken ? msgHeaderToken.substring(0, 10) + '...' : 'null');
+  console.log('Final token:', sseToken ? sseToken.substring(0, 10) + '...' : 'null');
+
   try {
     let result;
 
@@ -259,46 +295,11 @@ router.post('/messages', async (req, res) => {
         break;
 
       case 'tools/list':
-        result = await handleToolsList(mcpClient);
+        // 传递 accessToken 以便连接 Customer MCP 服务器时能够认证
+        result = await handleToolsList(mcpClient, { accessToken: sseToken, sessionId });
         break;
 
       case 'tools/call':
-        // 获取 token 的优先级：
-        // 1. session 中存储的 token（SSE 连接时通过 URL 参数传递）
-        // 2. 请求头中的 token
-        // 3. 从数据库获取（通过 sessionId）
-        // 4. 从环境变量获取 MCP_ACCESS_TOKEN（兜底）
-        let sseToken = session.accessToken;
-        let tokenSource = sseToken ? 'session_param' : null;
-        const msgHeaderToken = req.headers['authorization'] || req.headers['x-access-token'];
-
-        if (!sseToken && msgHeaderToken) {
-          sseToken = msgHeaderToken;
-          tokenSource = 'request_header';
-        }
-
-        // 如果还没有 token，尝试从数据库获取
-        if (!sseToken) {
-          const tokenRecord = getCustomerToken(sessionId);
-          if (tokenRecord && tokenRecord.access_token) {
-            sseToken = tokenRecord.access_token;
-            tokenSource = 'db';
-            console.log('Token retrieved from database for session:', sessionId);
-          }
-        }
-
-        // 如果还没有 token，使用环境变量中的 MCP_ACCESS_TOKEN（兜底）
-        if (!sseToken && process.env.MCP_ACCESS_TOKEN) {
-          sseToken = process.env.MCP_ACCESS_TOKEN;
-          tokenSource = 'env';
-          console.log('Using MCP_ACCESS_TOKEN from environment');
-        }
-        
-        console.log('=== Token Debug ===');
-        console.log('Session accessToken:', session.accessToken ? session.accessToken.substring(0, 10) + '...' : 'null');
-        console.log('Header accessToken:', msgHeaderToken ? msgHeaderToken.substring(0, 10) + '...' : 'null');
-        console.log('Final token:', sseToken ? sseToken.substring(0, 10) + '...' : 'null');
-        
         // 将客户端传入的 token 持久化，便于后续自动复用（需要 shopId）
         if (sseToken) {
           const shopId = session.shopId || params?.shop_id || params?.shopId || req.query.shop_id || req.query.shopId;
@@ -414,6 +415,29 @@ async function handleMcpMessage(req, res) {
     let result;
     let sessionId = req.get('Mcp-Session-Id');
 
+    // 获取 token（统一处理，用于 tools/list 和 tools/call）
+    // 优先级：请求头 > 数据库 > 环境变量
+    let httpToken = req.headers['authorization'] || req.headers['x-access-token'];
+
+    // 如果没有 token，尝试从数据库获取（使用 sessionId）
+    if (!httpToken && sessionId) {
+      const tokenRecord = getCustomerToken(sessionId);
+      if (tokenRecord && tokenRecord.access_token) {
+        httpToken = tokenRecord.access_token;
+        console.log('Token retrieved from database for session:', sessionId);
+      }
+    }
+
+    // 如果还没有 token，使用环境变量中的 MCP_ACCESS_TOKEN（兜底）
+    if (!httpToken && process.env.MCP_ACCESS_TOKEN) {
+      httpToken = process.env.MCP_ACCESS_TOKEN;
+      console.log('Using MCP_ACCESS_TOKEN from environment');
+    }
+
+    console.log('=== HTTP Message Token Debug ===');
+    console.log('Session ID:', sessionId);
+    console.log('Final token:', httpToken ? httpToken.substring(0, 15) + '...' : 'null');
+
     switch (method) {
       case 'initialize':
         result = await handleInitialize(params);
@@ -431,28 +455,11 @@ async function handleMcpMessage(req, res) {
         break;
 
       case 'tools/list':
-        result = await handleToolsList(mcpClient);
+        // 传递 accessToken 以便连接 Customer MCP 服务器时能够认证
+        result = await handleToolsList(mcpClient, { accessToken: httpToken, sessionId });
         break;
 
       case 'tools/call':
-        // 从请求头提取 accessToken，或从数据库获取，最后从环境变量获取
-        let httpToken = req.headers['authorization'] || req.headers['x-access-token'];
-
-        // 如果没有 token，尝试从数据库获取（使用 sessionId）
-        if (!httpToken && sessionId) {
-          const tokenRecord = getCustomerToken(sessionId);
-          if (tokenRecord && tokenRecord.access_token) {
-            httpToken = tokenRecord.access_token;
-            console.log('Token retrieved from database for session:', sessionId);
-          }
-        }
-
-        // 如果还没有 token，使用环境变量中的 MCP_ACCESS_TOKEN（兜底）
-        if (!httpToken && process.env.MCP_ACCESS_TOKEN) {
-          httpToken = process.env.MCP_ACCESS_TOKEN;
-          console.log('Using MCP_ACCESS_TOKEN from environment');
-        }
-
         result = await handleToolsCall(mcpClient, params, { accessToken: httpToken, sessionId });
         break;
 
@@ -536,18 +543,25 @@ async function handleInitialize(params) {
 
 /**
  * 处理 tools/list 方法
+ * @param {Object} mcpClient - MCP 客户端实例
+ * @param {Object} options - 可选配置
+ * @param {string} options.accessToken - 动态传递的访问令牌
+ * @param {string} options.sessionId - 会话 ID
  */
-async function handleToolsList(mcpClient) {
-  console.log('Handling tools/list');
+async function handleToolsList(mcpClient, options = {}) {
+  console.log('Handling tools/list with options:', {
+    hasAccessToken: !!options.accessToken,
+    sessionId: options.sessionId
+  });
 
   if (!mcpClient) {
     throw new Error('MCP client not initialized');
   }
 
-  // 确保已连接
+  // 确保已连接 - 传递 accessToken 以便连接 Customer MCP 服务器
   if (mcpClient.getTools().length === 0) {
     console.log('No tools loaded, connecting to MCP servers...');
-    await mcpClient.connectAll();
+    await mcpClient.connectAll(options);
   }
 
   const tools = mcpClient.getTools();
