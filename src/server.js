@@ -1,21 +1,28 @@
 /**
  * MCP HTTP Bridge Server
  * 将 MCP 服务包装成标准 HTTP API，供 Dify/N8N 等平台调用
- * 
+ *
  * 增强功能：
  * - 自动获取和存储客户 access token
  * - 调用需要认证的工具时自动使用存储的 token
  * - 支持 OAuth 认证流程
+ * - 支持 Shopify Admin API
  */
 
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import MCPClient from './mcp-client.js';
 import toolsRouter from './routes/tools.js';
 import callRouter from './routes/call.js';
 import mcpRouter from './routes/mcp.js';
 import authRouter from './routes/auth.js';
+
+// 获取 __dirname (ES modules 中需要)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // 加载环境变量
 dotenv.config();
@@ -26,6 +33,9 @@ const PORT = process.env.PORT || 3000;
 // 中间件
 app.use(cors());
 app.use(express.json());
+
+// 静态文件服务 (public 文件夹)
+app.use(express.static(path.join(__dirname, '../public')));
 
 // 请求日志
 app.use((req, res, next) => {
@@ -56,6 +66,16 @@ app.use('/auth', authRouter);
 // MCP 协议路由 (用于 Dify MCP HTTP 集成)
 app.use('/mcp', mcpRouter);
 
+// 登录页面 (重定向到 login.html)
+app.get('/login', (req, res) => {
+  const shopId = req.query.shop_id || req.query.shopId || '';
+  if (shopId) {
+    res.redirect(`/login.html?shop_id=${encodeURIComponent(shopId)}`);
+  } else {
+    res.redirect('/login.html');
+  }
+});
+
 // 健康检查
 app.get('/api/health', (req, res) => {
   res.json({
@@ -80,6 +100,7 @@ app.get('/', (req, res) => {
     version: '1.2.0',
     description: 'HTTP bridge for MCP (Model Context Protocol) services with automatic customer authentication and Shopify Admin API support',
     endpoints: {
+      'GET /login': 'Customer login page for Shopify OAuth authentication',
       'GET /api/health': 'Health check',
       'GET /api/tools': 'List all available MCP tools',
       'POST /api/call': 'Call a specific MCP tool',
@@ -198,6 +219,7 @@ app.listen(PORT, async () => {
   console.log(`    POST http://localhost:${PORT}/api/call`);
   console.log('');
   console.log('  OAuth Endpoints:');
+  console.log(`    GET  http://localhost:${PORT}/login        (Login page)`);
   console.log(`    GET  http://localhost:${PORT}/auth/login`);
   console.log(`    GET  http://localhost:${PORT}/auth/callback`);
   console.log(`    GET  http://localhost:${PORT}/auth/status`);

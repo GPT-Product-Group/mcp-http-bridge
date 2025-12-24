@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shopify 登录 - MCP HTTP Bridge</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      padding: 40px;
+      max-width: 480px;
+      width: 100%;
+    }
+
+    .logo {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .logo svg {
+      width: 60px;
+      height: 60px;
+    }
+
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 24px;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #666;
+      margin-bottom: 30px;
+      font-size: 14px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      color: #333;
+      font-weight: 500;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid #e1e1e1;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color 0.3s;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    input::placeholder {
+      color: #aaa;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .status-box {
+      margin-top: 20px;
+      padding: 16px;
+      border-radius: 8px;
+      display: none;
+    }
+
+    .status-box.success {
+      background: #d4edda;
+      border: 1px solid #c3e6cb;
+      color: #155724;
+      display: block;
+    }
+
+    .status-box.error {
+      background: #f8d7da;
+      border: 1px solid #f5c6cb;
+      color: #721c24;
+      display: block;
+    }
+
+    .status-box.info {
+      background: #d1ecf1;
+      border: 1px solid #bee5eb;
+      color: #0c5460;
+      display: block;
+    }
+
+    .session-id {
+      font-family: monospace;
+      background: #f8f9fa;
+      padding: 12px;
+      border-radius: 6px;
+      margin: 10px 0;
+      word-break: break-all;
+      font-size: 14px;
+      border: 1px dashed #ccc;
+    }
+
+    .copy-btn {
+      background: #28a745;
+      color: white;
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-top: 10px;
+    }
+
+    .copy-btn:hover {
+      background: #218838;
+    }
+
+    .instructions {
+      margin-top: 20px;
+      padding: 16px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      font-size: 14px;
+      color: #666;
+    }
+
+    .instructions h3 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 16px;
+    }
+
+    .instructions ol {
+      margin-left: 20px;
+    }
+
+    .instructions li {
+      margin-bottom: 8px;
+    }
+
+    .divider {
+      height: 1px;
+      background: #e1e1e1;
+      margin: 30px 0;
+    }
+
+    .check-status {
+      text-align: center;
+      margin-top: 20px;
+    }
+
+    .check-status a {
+      color: #667eea;
+      text-decoration: none;
+    }
+
+    .check-status a:hover {
+      text-decoration: underline;
+    }
+
+    .loading {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 2px solid #fff;
+      border-radius: 50%;
+      border-top-color: transparent;
+      animation: spin 1s linear infinite;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">
+      <svg viewBox="0 0 109 124" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M74.7 14.8c-.1-.8-.8-1.3-1.4-1.3-.6 0-12.1-.5-12.1-.5s-8-7.8-8.9-8.7c-.9-.9-2.5-.6-3.2-.4-.1 0-1.7.5-4.6 1.4C42.5 1.9 39.3 0 35.4 0c-11.5 0-17 14.4-18.7 21.7-4.5 1.4-7.7 2.4-8.1 2.5-2.5.8-2.6.9-2.9 3.3-.3 1.8-6.7 52.1-6.7 52.1L74 93.2l25.6-5.5S74.8 15.6 74.7 14.8zM53.6 9.3c-2.2.7-4.7 1.4-7.4 2.3 0-3.7-.5-8.9-2.2-13.2 5.4 1 8 7.1 9.6 10.9zm-12.6 3.9c-5 1.5-10.5 3.2-16 4.9 1.5-5.9 4.5-11.8 10.1-13.9 2.1-.8 4.7-.9 6.5.2 1.8 2.8 1.9 7.2-.6 8.8zm-8-12.5c1.1 0 2 .2 2.9.6-6.5 3-9.5 11.5-10.5 17.4-4.5 1.4-8.9 2.8-13 4 2.6-12.4 12-22 20.6-22z" fill="#95BF46"/>
+        <path d="M73.3 13.5c-.6 0-12.1-.5-12.1-.5s-8-7.8-8.9-8.7c-.3-.3-.7-.5-1.1-.5v89.4l49.4-10.7S74.8 15.6 74.7 14.8c-.1-.8-.8-1.3-1.4-1.3z" fill="#5E8E3E"/>
+        <path d="M35.4 41.9l-4.3 16.5s-4.7-2.5-10.5-2.5c-8.5 0-8.9 5.3-8.9 6.7 0 7.3 19 10.1 19 27.2 0 13.5-8.5 22.1-20 22.1-13.8 0-20.8-8.6-20.8-8.6l3.7-12.2s7.2 6.2 13.3 6.2c4 0 5.6-3.1 5.6-5.4 0-9.5-15.6-9.9-15.6-25.6 0-13.2 9.5-26 28.5-26 7.3 0 10 2.1 10 2.1v-.5z" fill="#fff"/>
+      </svg>
+    </div>
+
+    <h1>Shopify 客户登录</h1>
+    <p class="subtitle">登录后可在 Dify Agent 中查询您的订单</p>
+
+    <form id="loginForm">
+      <div class="form-group">
+        <label for="shopId">店铺域名</label>
+        <input type="text" id="shopId" name="shopId"
+               placeholder="例如: your-store.myshopify.com"
+               required>
+      </div>
+
+      <button type="submit" class="btn btn-primary" id="loginBtn">
+        登录 Shopify
+      </button>
+    </form>
+
+    <div id="statusBox" class="status-box"></div>
+
+    <div class="divider"></div>
+
+    <div class="check-status">
+      <p>已经登录？<a href="#" onclick="checkStatus()">检查登录状态</a></p>
+    </div>
+
+    <div class="instructions">
+      <h3>使用说明</h3>
+      <ol>
+        <li>输入您的 Shopify 店铺域名</li>
+        <li>点击"登录 Shopify"按钮</li>
+        <li>在弹出的页面完成 Shopify 登录授权</li>
+        <li>登录成功后，复制 Session ID</li>
+        <li>在 Dify 对话中告诉 Agent 您的 Session ID</li>
+      </ol>
+    </div>
+  </div>
+
+  <script>
+    // 从 URL 参数获取 shop_id（如果有）
+    const urlParams = new URLSearchParams(window.location.search);
+    const shopIdParam = urlParams.get('shop_id') || urlParams.get('shopId');
+    if (shopIdParam) {
+      document.getElementById('shopId').value = shopIdParam;
+    }
+
+    // 检查是否是 OAuth 回调后的页面
+    const sessionId = urlParams.get('session_id');
+    const status = urlParams.get('status');
+
+    if (sessionId && status === 'success') {
+      showSuccess(sessionId);
+    } else if (status === 'error') {
+      showError(urlParams.get('message') || '登录失败，请重试');
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const shopId = document.getElementById('shopId').value.trim();
+      const btn = document.getElementById('loginBtn');
+
+      if (!shopId) {
+        showError('请输入店铺域名');
+        return;
+      }
+
+      // 生成 session_id
+      const newSessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading"></span>正在跳转...';
+
+      // 保存 session_id 到 localStorage，以便回调后使用
+      localStorage.setItem('pending_session_id', newSessionId);
+      localStorage.setItem('pending_shop_id', shopId);
+
+      // 跳转到 OAuth 登录页面
+      const loginUrl = `/auth/login?session_id=${encodeURIComponent(newSessionId)}&shop_id=${encodeURIComponent(shopId)}&redirect_to_login=true`;
+      window.location.href = loginUrl;
+    });
+
+    function showSuccess(sessionId) {
+      const statusBox = document.getElementById('statusBox');
+      statusBox.className = 'status-box success';
+      statusBox.innerHTML = `
+        <strong>登录成功！</strong>
+        <p style="margin-top: 10px;">您的 Session ID：</p>
+        <div class="session-id" id="sessionIdText">${sessionId}</div>
+        <button class="copy-btn" onclick="copySessionId('${sessionId}')">复制 Session ID</button>
+        <p style="margin-top: 15px; font-size: 13px;">
+          在 Dify 对话中，告诉 Agent：<br>
+          <em>"我的 session_id 是 ${sessionId}"</em>
+        </p>
+      `;
+    }
+
+    function showError(message) {
+      const statusBox = document.getElementById('statusBox');
+      statusBox.className = 'status-box error';
+      statusBox.innerHTML = `<strong>错误：</strong>${message}`;
+    }
+
+    function showInfo(message) {
+      const statusBox = document.getElementById('statusBox');
+      statusBox.className = 'status-box info';
+      statusBox.innerHTML = message;
+    }
+
+    function copySessionId(sessionId) {
+      navigator.clipboard.writeText(sessionId).then(() => {
+        const btn = event.target;
+        btn.textContent = '已复制！';
+        btn.style.background = '#6c757d';
+        setTimeout(() => {
+          btn.textContent = '复制 Session ID';
+          btn.style.background = '#28a745';
+        }, 2000);
+      }).catch(() => {
+        // 降级方案
+        const textArea = document.createElement('textarea');
+        textArea.value = sessionId;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        alert('已复制到剪贴板！');
+      });
+    }
+
+    async function checkStatus() {
+      const sessionId = localStorage.getItem('pending_session_id');
+      if (!sessionId) {
+        showInfo('没有找到待验证的登录会话。请先登录。');
+        return;
+      }
+
+      try {
+        const response = await fetch(`/auth/status?session_id=${encodeURIComponent(sessionId)}`);
+        const data = await response.json();
+
+        if (data.authenticated) {
+          showSuccess(sessionId);
+        } else {
+          showInfo(`Session ID: ${sessionId}<br>状态：未登录<br>请完成 Shopify 授权后再检查。`);
+        }
+      } catch (error) {
+        showError('检查状态失败：' + error.message);
+      }
+    }
+  </script>
+</body>
+</html>

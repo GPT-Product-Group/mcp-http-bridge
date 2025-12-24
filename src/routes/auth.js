@@ -12,16 +12,17 @@ const router = Router();
 /**
  * GET /auth/login
  * 发起 OAuth 认证流程
- * 
+ *
  * Query params:
  * - session_id: 会话 ID (必填)
  * - shop_id: 商店 ID，如 xxx.myshopify.com (必填)
- * 
+ * - redirect_to_login: 是否在成功后重定向回登录页面 (可选)
+ *
  * 会重定向到 Shopify 认证页面
  */
 router.get('/login', async (req, res) => {
   try {
-    const { session_id, shop_id } = req.query;
+    const { session_id, shop_id, redirect_to_login } = req.query;
 
     if (!session_id || !shop_id) {
       return res.status(400).json({
@@ -41,7 +42,7 @@ router.get('/login', async (req, res) => {
     }
 
     // 默认权限范围
-    const scopes = process.env.SHOPIFY_CUSTOMER_SCOPES || 
+    const scopes = process.env.SHOPIFY_CUSTOMER_SCOPES ||
       'customer_read_customers,customer_read_orders';
 
     const authResult = await generateAuthUrl({
@@ -49,7 +50,8 @@ router.get('/login', async (req, res) => {
       shopId: shop_id,
       clientId,
       redirectUri,
-      scopes: scopes.split(',').map(s => s.trim())
+      scopes: scopes.split(',').map(s => s.trim()),
+      redirectToLogin: redirect_to_login === 'true'
     });
 
     console.log('Redirecting to auth URL...');
@@ -154,54 +156,22 @@ router.get('/callback', async (req, res) => {
 
     console.log('Token stored successfully for session:', sessionId);
 
-    // 返回成功页面，自动关闭窗口
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Authentication Successful</title>
-        <script>
-          window.onload = function() {
-            document.getElementById('message').style.display = 'block';
-            setTimeout(function() {
-              window.close();
-              document.getElementById('fallback').style.display = 'block';
-            }, 1500);
-          }
-        </script>
-        <style>
-          body { font-family: system-ui, sans-serif; text-align: center; padding-top: 100px; }
-          #message { display: none; }
-          #fallback { display: none; margin-top: 20px; }
-          .success { color: green; font-size: 18px; }
-        </style>
-      </head>
-      <body>
-        <div id="message">
-          <h2>✅ Authentication Successful!</h2>
-          <p class="success">You've been authenticated successfully</p>
-          <p>This window will close automatically.</p>
-        </div>
-        <div id="fallback">
-          <p>If this window didn't close automatically, you can close it and return to your conversation.</p>
-        </div>
-      </body>
-      </html>
-    `);
+    // 重定向到登录页面显示成功状态和 session_id
+    const protocol = req.protocol;
+    const host = req.get('host');
+    const loginPageUrl = `${protocol}://${host}/login.html?session_id=${encodeURIComponent(sessionId)}&status=success`;
+
+    res.redirect(loginPageUrl);
 
   } catch (error) {
     console.error('OAuth callback error:', error);
-    res.status(500).send(`
-      <!DOCTYPE html>
-      <html>
-      <head><title>Authentication Failed</title></head>
-      <body style="font-family: system-ui; text-align: center; padding-top: 100px;">
-        <h2>Authentication Failed</h2>
-        <p style="color: red;">${error.message}</p>
-        <p>Please close this window and try again.</p>
-      </body>
-      </html>
-    `);
+
+    // 重定向到登录页面显示错误
+    const protocol = req.protocol;
+    const host = req.get('host');
+    const loginPageUrl = `${protocol}://${host}/login.html?status=error&message=${encodeURIComponent(error.message)}`;
+
+    res.redirect(loginPageUrl);
   }
 });
 
@@ -225,12 +195,14 @@ router.get('/status', (req, res) => {
 
   if (token) {
     res.json({
+      authenticated: true,
       status: 'authorized',
-      expires_at: token.expiresAt.toISOString(),
+      expires_at: token.expires_at,
       shop_id: token.shop_id
     });
   } else {
     res.json({
+      authenticated: false,
       status: 'unauthorized'
     });
   }
