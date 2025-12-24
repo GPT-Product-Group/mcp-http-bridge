@@ -16,6 +16,10 @@
  * - notifications/initialized
  * - tools/list
  * - tools/call
+ *
+ * Admin API 支持:
+ * - 在 URL 中传递 admin_token 参数即可使用 Admin API 工具 (admin_*)
+ * - 示例: /mcp/sse?admin_token=shpat_xxx&shop_id=xxx.myshopify.com
  */
 
 import { Router } from 'express';
@@ -113,10 +117,18 @@ router.get('/sse', (req, res) => {
                     req.headers['authorization'] || req.headers['x-access-token'];
   const shopId = req.query.shop_id || req.query.shopId;
 
+  // 获取 Admin Token (用于 Admin API 工具)
+  const adminToken = req.query.admin_token || req.query.adminToken ||
+                     req.headers['x-admin-token'] || req.headers['x-shopify-access-token'];
+
   if (accessToken) {
     console.log('AccessToken provided via URL/header:', accessToken.substring(0, 10) + '...');
   } else {
     console.log('No accessToken in URL/headers, will try database lookup');
+  }
+
+  if (adminToken) {
+    console.log('AdminToken provided via URL/header:', adminToken.substring(0, 10) + '...');
   }
 
   if (shopId) {
@@ -153,10 +165,11 @@ router.get('/sse', (req, res) => {
   res.write(`event: endpoint\n`);
   res.write(`data: ${messageEndpoint}\n\n`);
 
-  // 存储 session 信息，包括 SSE response 对象、accessToken 和 shopId 用于后续发送响应
+  // 存储 session 信息，包括 SSE response 对象、accessToken、adminToken 和 shopId 用于后续发送响应
   sessions.set(sessionId, {
     res: res,
     accessToken: accessToken || null,
+    adminToken: adminToken || null,
     shopId: shopId || null,
     createdAt: Date.now()
   });
@@ -275,10 +288,22 @@ router.post('/messages', async (req, res) => {
     console.log('Using MCP_ACCESS_TOKEN from environment');
   }
 
+  // 获取 Admin Token
+  let adminToken = session.adminToken;
+  const msgAdminToken = req.headers['x-admin-token'] || req.headers['x-shopify-access-token'];
+  if (!adminToken && msgAdminToken) {
+    adminToken = msgAdminToken;
+  }
+
+  // 获取 shopId
+  const shopId = session.shopId || params?.shop_id || params?.shopId || req.query.shop_id || req.query.shopId;
+
   console.log('=== Token Debug ===');
   console.log('Session accessToken:', session.accessToken ? session.accessToken.substring(0, 10) + '...' : 'null');
   console.log('Header accessToken:', msgHeaderToken ? msgHeaderToken.substring(0, 10) + '...' : 'null');
   console.log('Final token:', sseToken ? sseToken.substring(0, 10) + '...' : 'null');
+  console.log('Admin token:', adminToken ? adminToken.substring(0, 10) + '...' : 'null');
+  console.log('Shop ID:', shopId || 'null');
 
   try {
     let result;
@@ -295,14 +320,13 @@ router.post('/messages', async (req, res) => {
         break;
 
       case 'tools/list':
-        // 传递 accessToken 以便连接 Customer MCP 服务器时能够认证
-        result = await handleToolsList(mcpClient, { accessToken: sseToken, sessionId });
+        // 传递 accessToken 和 adminToken 以便加载对应的工具
+        result = await handleToolsList(mcpClient, { accessToken: sseToken, adminToken, shopId, sessionId });
         break;
 
       case 'tools/call':
         // 将客户端传入的 token 持久化，便于后续自动复用（需要 shopId）
         if (sseToken) {
-          const shopId = session.shopId || params?.shop_id || params?.shopId || req.query.shop_id || req.query.shopId;
           persistIncomingToken({
             token: sseToken,
             sessionId,
@@ -311,7 +335,7 @@ router.post('/messages', async (req, res) => {
           });
         }
 
-        result = await handleToolsCall(mcpClient, params, { accessToken: sseToken, sessionId });
+        result = await handleToolsCall(mcpClient, params, { accessToken: sseToken, adminToken, shopId, sessionId });
         break;
 
       default:
@@ -434,9 +458,18 @@ async function handleMcpMessage(req, res) {
       console.log('Using MCP_ACCESS_TOKEN from environment');
     }
 
+    // 获取 Admin Token
+    let httpAdminToken = req.headers['x-admin-token'] || req.headers['x-shopify-access-token'] ||
+                         req.query.admin_token || req.query.adminToken;
+
+    // 获取 Shop ID
+    const httpShopId = req.query.shop_id || req.query.shopId || params?.shop_id || params?.shopId;
+
     console.log('=== HTTP Message Token Debug ===');
     console.log('Session ID:', sessionId);
     console.log('Final token:', httpToken ? httpToken.substring(0, 15) + '...' : 'null');
+    console.log('Admin token:', httpAdminToken ? httpAdminToken.substring(0, 15) + '...' : 'null');
+    console.log('Shop ID:', httpShopId || 'null');
 
     switch (method) {
       case 'initialize':
@@ -455,12 +488,12 @@ async function handleMcpMessage(req, res) {
         break;
 
       case 'tools/list':
-        // 传递 accessToken 以便连接 Customer MCP 服务器时能够认证
-        result = await handleToolsList(mcpClient, { accessToken: httpToken, sessionId });
+        // 传递 accessToken 和 adminToken 以便加载对应的工具
+        result = await handleToolsList(mcpClient, { accessToken: httpToken, adminToken: httpAdminToken, shopId: httpShopId, sessionId });
         break;
 
       case 'tools/call':
-        result = await handleToolsCall(mcpClient, params, { accessToken: httpToken, sessionId });
+        result = await handleToolsCall(mcpClient, params, { accessToken: httpToken, adminToken: httpAdminToken, shopId: httpShopId, sessionId });
         break;
 
       default:
@@ -546,11 +579,15 @@ async function handleInitialize(params) {
  * @param {Object} mcpClient - MCP 客户端实例
  * @param {Object} options - 可选配置
  * @param {string} options.accessToken - 动态传递的访问令牌
+ * @param {string} options.adminToken - Admin API Token
+ * @param {string} options.shopId - 店铺域名
  * @param {string} options.sessionId - 会话 ID
  */
 async function handleToolsList(mcpClient, options = {}) {
   console.log('Handling tools/list with options:', {
     hasAccessToken: !!options.accessToken,
+    hasAdminToken: !!options.adminToken,
+    shopId: options.shopId,
     sessionId: options.sessionId
   });
 
@@ -562,6 +599,12 @@ async function handleToolsList(mcpClient, options = {}) {
   if (mcpClient.getTools().length === 0) {
     console.log('No tools loaded, connecting to MCP servers...');
     await mcpClient.connectAll(options);
+  }
+
+  // 如果有 adminToken，确保加载 Admin 工具
+  if (options.adminToken && mcpClient.adminTools.length === 0) {
+    console.log('Loading Admin API tools...');
+    mcpClient.loadAdminTools(options);
   }
 
   const tools = mcpClient.getTools();
@@ -590,6 +633,8 @@ async function handleToolsList(mcpClient, options = {}) {
  * @param {Object} params - 工具调用参数
  * @param {Object} options - 可选配置
  * @param {string} options.accessToken - 动态传递的访问令牌
+ * @param {string} options.adminToken - Admin API Token
+ * @param {string} options.shopId - 店铺域名
  */
 async function handleToolsCall(mcpClient, params, options = {}) {
   console.log('Handling tools/call:', params);
@@ -598,7 +643,7 @@ async function handleToolsCall(mcpClient, params, options = {}) {
     throw new Error('MCP client not initialized');
   }
 
-  const { name, arguments: toolArgs, accessToken: paramToken } = params || {};
+  const { name, arguments: toolArgs, accessToken: paramToken, admin_token: paramAdminToken, shop_id: paramShopId } = params || {};
 
   if (!name) {
     throw new Error('Tool name is required');
@@ -608,6 +653,13 @@ async function handleToolsCall(mcpClient, params, options = {}) {
   if (mcpClient.getTools().length === 0) {
     console.log('No tools loaded, connecting to MCP servers...');
     await mcpClient.connectAll(options);
+  }
+
+  // 如果有 adminToken，确保加载 Admin 工具
+  const adminToken = paramAdminToken || options.adminToken;
+  if (adminToken && mcpClient.adminTools.length === 0) {
+    console.log('Loading Admin API tools for tool call...');
+    mcpClient.loadAdminTools({ adminToken });
   }
 
   // 解析参数（处理可能的字符串格式）
@@ -638,12 +690,18 @@ async function handleToolsCall(mcpClient, params, options = {}) {
     console.log('Using dynamic accessToken for tool call');
   }
 
-  // 添加 sessionId 到调用选项
+  // 添加 adminToken 和 shopId 到调用选项
+  callOptions.adminToken = adminToken;
+  callOptions.shopId = paramShopId || options.shopId;
   callOptions.sessionId = options.sessionId;
 
   console.log(`Calling tool: ${name}`);
   console.log('Arguments:', JSON.stringify(parsedArgs, null, 2));
-  console.log('Call options:', JSON.stringify({ ...callOptions, accessToken: callOptions.accessToken ? '[REDACTED]' : null }, null, 2));
+  console.log('Call options:', JSON.stringify({
+    ...callOptions,
+    accessToken: callOptions.accessToken ? '[REDACTED]' : null,
+    adminToken: callOptions.adminToken ? '[REDACTED]' : null
+  }, null, 2));
 
   const result = await mcpClient.callTool(name, parsedArgs, callOptions);
 
