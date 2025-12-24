@@ -129,7 +129,7 @@ router.post('/', async (req, res) => {
     // 确保已连接
     if (mcpClient.getTools().length === 0) {
       console.log('No tools loaded, connecting to MCP servers...');
-      await mcpClient.connectAll({ sessionId: session_id });
+      await mcpClient.connectAll({ sessionId: session_id, accessToken: dynamicToken });
     }
 
     // 调用工具
