@@ -520,7 +520,10 @@ async function getInventory(shopDomain, adminToken, options = {}) {
               edges {
                 node {
                   id
-                  available
+                  quantities(names: ["available", "on_hand", "committed"]) {
+                    name
+                    quantity
+                  }
                   item {
                     id
                     sku
