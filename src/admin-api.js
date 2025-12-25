@@ -383,6 +383,237 @@ async function getShopInfo(shopDomain, adminToken) {
 }
 
 /**
+ * 获取客户列表
+ */
+async function getCustomers(shopDomain, adminToken, options = {}) {
+  const { first = 10, query: searchQuery } = options;
+
+  const query = `
+    query GetCustomers($first: Int!, $query: String) {
+      customers(first: $first, query: $query) {
+        edges {
+          node {
+            id
+            firstName
+            lastName
+            email
+            phone
+            createdAt
+            updatedAt
+            numberOfOrders
+            amountSpent {
+              amount
+              currencyCode
+            }
+            defaultAddress {
+              address1
+              address2
+              city
+              province
+              country
+              zip
+              phone
+            }
+            tags
+            note
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  `;
+
+  return executeAdminQuery(shopDomain, adminToken, query, {
+    first,
+    query: searchQuery || null
+  });
+}
+
+/**
+ * 获取草稿订单列表
+ */
+async function getDraftOrders(shopDomain, adminToken, options = {}) {
+  const { first = 10, query: searchQuery } = options;
+
+  const query = `
+    query GetDraftOrders($first: Int!, $query: String) {
+      draftOrders(first: $first, query: $query, reverse: true) {
+        edges {
+          node {
+            id
+            name
+            createdAt
+            updatedAt
+            status
+            totalPriceSet {
+              shopMoney {
+                amount
+                currencyCode
+              }
+            }
+            customer {
+              id
+              firstName
+              lastName
+              email
+            }
+            lineItems(first: 10) {
+              edges {
+                node {
+                  title
+                  quantity
+                  originalUnitPriceSet {
+                    shopMoney {
+                      amount
+                      currencyCode
+                    }
+                  }
+                }
+              }
+            }
+            shippingAddress {
+              firstName
+              lastName
+              address1
+              city
+              province
+              country
+              zip
+            }
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  `;
+
+  return executeAdminQuery(shopDomain, adminToken, query, {
+    first,
+    query: searchQuery || null
+  });
+}
+
+/**
+ * 获取库存信息
+ */
+async function getInventory(shopDomain, adminToken, options = {}) {
+  const { first = 10 } = options;
+
+  const query = `
+    query GetInventoryLevels($first: Int!) {
+      locations(first: 5) {
+        edges {
+          node {
+            id
+            name
+            address {
+              city
+              country
+            }
+            inventoryLevels(first: $first) {
+              edges {
+                node {
+                  id
+                  available
+                  item {
+                    id
+                    sku
+                    variant {
+                      id
+                      title
+                      product {
+                        title
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  return executeAdminQuery(shopDomain, adminToken, query, { first });
+}
+
+/**
+ * 获取折扣码列表
+ */
+async function getDiscounts(shopDomain, adminToken, options = {}) {
+  const { first = 10 } = options;
+
+  const query = `
+    query GetDiscounts($first: Int!) {
+      codeDiscountNodes(first: $first) {
+        edges {
+          node {
+            id
+            codeDiscount {
+              ... on DiscountCodeBasic {
+                title
+                status
+                startsAt
+                endsAt
+                usageLimit
+                codes(first: 5) {
+                  edges {
+                    node {
+                      code
+                      usageCount
+                    }
+                  }
+                }
+                customerGets {
+                  value {
+                    ... on DiscountPercentage {
+                      percentage
+                    }
+                    ... on DiscountAmount {
+                      amount {
+                        amount
+                        currencyCode
+                      }
+                    }
+                  }
+                }
+              }
+              ... on DiscountCodeFreeShipping {
+                title
+                status
+                startsAt
+                endsAt
+                codes(first: 5) {
+                  edges {
+                    node {
+                      code
+                      usageCount
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  `;
+
+  return executeAdminQuery(shopDomain, adminToken, query, { first });
+}
+
+/**
  * Admin API 工具定义
  * 这些工具会被注册到 MCP 服务中
  */
@@ -458,6 +689,70 @@ const ADMIN_TOOLS = [
       type: 'object',
       properties: {}
     }
+  },
+  {
+    name: 'admin_get_customers',
+    description: '获取客户列表 (需要 Admin Token)。返回客户信息包括姓名、邮箱、电话、订单数、消费金额等。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        first: {
+          type: 'number',
+          description: '返回的客户数量 (默认 10，最大 50)',
+          default: 10
+        },
+        query: {
+          type: 'string',
+          description: '搜索查询 (如 "email:test@example.com", "phone:+1234567890")'
+        }
+      }
+    }
+  },
+  {
+    name: 'admin_get_draft_orders',
+    description: '获取草稿订单列表 (需要 Admin Token)。草稿订单是未完成的订单，可用于代客下单等场景。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        first: {
+          type: 'number',
+          description: '返回的草稿订单数量 (默认 10，最大 50)',
+          default: 10
+        },
+        query: {
+          type: 'string',
+          description: '搜索查询 (如 "status:open", "status:completed")'
+        }
+      }
+    }
+  },
+  {
+    name: 'admin_get_inventory',
+    description: '获取库存信息 (需要 Admin Token)。返回各仓库位置的商品库存数量。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        first: {
+          type: 'number',
+          description: '每个仓库返回的库存记录数量 (默认 10)',
+          default: 10
+        }
+      }
+    }
+  },
+  {
+    name: 'admin_get_discounts',
+    description: '获取折扣码列表 (需要 Admin Token)。返回店铺的折扣码信息包括折扣类型、使用次数、有效期等。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        first: {
+          type: 'number',
+          description: '返回的折扣码数量 (默认 10)',
+          default: 10
+        }
+      }
+    }
   }
 ];
 
@@ -507,6 +802,28 @@ async function callAdminTool(toolName, args, shopDomain, adminToken) {
     case 'admin_get_shop_info':
       return getShopInfo(shopDomain, adminToken);
 
+    case 'admin_get_customers':
+      return getCustomers(shopDomain, adminToken, {
+        first: Math.min(args.first || 10, 50),
+        query: args.query
+      });
+
+    case 'admin_get_draft_orders':
+      return getDraftOrders(shopDomain, adminToken, {
+        first: Math.min(args.first || 10, 50),
+        query: args.query
+      });
+
+    case 'admin_get_inventory':
+      return getInventory(shopDomain, adminToken, {
+        first: Math.min(args.first || 10, 50)
+      });
+
+    case 'admin_get_discounts':
+      return getDiscounts(shopDomain, adminToken, {
+        first: Math.min(args.first || 10, 50)
+      });
+
     default:
       throw new Error(`Unknown admin tool: ${toolName}`);
   }
@@ -526,6 +843,10 @@ export {
   getProducts,
   getRefunds,
   getShopInfo,
+  getCustomers,
+  getDraftOrders,
+  getInventory,
+  getDiscounts,
   ADMIN_TOOLS,
   callAdminTool,
   isAdminTool
