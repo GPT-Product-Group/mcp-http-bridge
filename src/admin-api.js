@@ -563,11 +563,11 @@ async function getDiscounts(shopDomain, adminToken, options = {}) {
                 startsAt
                 endsAt
                 usageLimit
+                asyncUsageCount
                 codes(first: 5) {
                   edges {
                     node {
                       code
-                      usageCount
                     }
                   }
                 }
@@ -590,11 +590,11 @@ async function getDiscounts(shopDomain, adminToken, options = {}) {
                 status
                 startsAt
                 endsAt
+                asyncUsageCount
                 codes(first: 5) {
                   edges {
                     node {
                       code
-                      usageCount
                     }
                   }
                 }
