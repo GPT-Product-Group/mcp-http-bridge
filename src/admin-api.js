@@ -505,18 +505,16 @@ async function getDraftOrders(shopDomain, adminToken, options = {}) {
 async function getInventory(shopDomain, adminToken, options = {}) {
   const { first = 10 } = options;
 
+  // 使用 inventoryItems 查询，只需要 read_inventory 权限
   const query = `
-    query GetInventoryLevels($first: Int!) {
-      locations(first: 5) {
+    query GetInventoryItems($first: Int!) {
+      inventoryItems(first: $first) {
         edges {
           node {
             id
-            name
-            address {
-              city
-              country
-            }
-            inventoryLevels(first: $first) {
+            sku
+            tracked
+            inventoryLevels(first: 5) {
               edges {
                 node {
                   id
@@ -524,21 +522,25 @@ async function getInventory(shopDomain, adminToken, options = {}) {
                     name
                     quantity
                   }
-                  item {
+                  location {
                     id
-                    sku
-                    variant {
-                      id
-                      title
-                      product {
-                        title
-                      }
-                    }
                   }
                 }
               }
             }
+            variant {
+              id
+              title
+              price
+              product {
+                title
+              }
+            }
           }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
         }
       }
     }
